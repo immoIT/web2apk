@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.webkit.JavascriptInterface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,7 +23,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.net.http.SslError
-import android.widget.ProgressBar
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -40,12 +42,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
-    private lateinit var progressBar: ProgressBar
     private lateinit var swipeRefresh: SwipeRefreshLayout
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var permissionCallback: PermissionRequest? = null
     private var pendingWebResources: Array<String> = emptyArray()
+    private val clipboardManager by lazy {
+        getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+    }
 
     private val startUrl = BuildConfig.WEB_URL
 
@@ -85,7 +89,6 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webView)
-        progressBar = findViewById(R.id.progressBar)
         swipeRefresh = findViewById(R.id.swipeRefresh)
 
         swipeRefresh.isEnabled = BuildConfig.ENABLE_PULL_TO_REFRESH
@@ -94,6 +97,7 @@ class MainActivity : AppCompatActivity() {
             webView.reload()
         }
 
+        webView.addJavascriptInterface(WebClipboardBridge(), "AndroidClipboard")
         configureWebView()
         requestConfiguredPermissions()
 
@@ -200,12 +204,11 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 log("Page started: $url")
-                progressBar.visibility = View.VISIBLE
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 log("Page finished: $url")
-                progressBar.visibility = View.GONE
+                injectClipboardSupport(view)
                 swipeRefresh.isRefreshing = false
             }
 
@@ -217,7 +220,6 @@ class MainActivity : AppCompatActivity() {
                 super.onReceivedError(view, request, error)
                 logError("Web resource error: mainFrame=${request?.isForMainFrame}, url=${request?.url}, code=${error?.errorCode}, description=${error?.description}")
                 if (request?.isForMainFrame == true) {
-                    progressBar.visibility = View.GONE
                     swipeRefresh.isRefreshing = false
                 }
             }
@@ -260,6 +262,68 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
+    }
+
+    private inner class WebClipboardBridge {
+        @JavascriptInterface
+        fun readText(): String {
+            if (!isTrustedPage()) return ""
+            return if (clipboardManager.hasPrimaryClip()) {
+                runCatching {
+                    clipboardManager.primaryClip?.getItemAt(0)?.coerceToText(this@MainActivity)?.toString().orEmpty()
+                }.getOrDefault("")
+            } else {
+                ""
+            }
+        }
+
+        @JavascriptInterface
+        fun writeText(text: String?) {
+            if (!isTrustedPage()) return
+            clipboardManager.setPrimaryClip(ClipData.newPlainText("WebView", text.orEmpty()))
+        }
+    }
+
+    private fun isTrustedPage(): Boolean {
+        val currentHost = runCatching { Uri.parse(webView.url ?: startUrl).host }.getOrNull()
+        val trustedHost = runCatching { Uri.parse(startUrl).host }.getOrNull()
+        return !trustedHost.isNullOrEmpty() && currentHost == trustedHost
+    }
+
+    private fun injectClipboardSupport(view: WebView?) {
+        if (view == null || !isTrustedPage()) return
+
+        val script = """
+            (function() {
+                try {
+                    if (!window.AndroidClipboard) return;
+
+                    var nativeClipboard = {
+                        readText: function() {
+                            return Promise.resolve(window.AndroidClipboard.readText());
+                        },
+                        writeText: function(text) {
+                            window.AndroidClipboard.writeText(String(text));
+                            return Promise.resolve();
+                        }
+                    };
+
+                    try {
+                        Object.defineProperty(navigator, 'clipboard', {
+                            configurable: true,
+                            enumerable: true,
+                            get: function() { return nativeClipboard; }
+                        });
+                    } catch (e) {
+                        try { navigator.clipboard = nativeClipboard; } catch (_) {}
+                    }
+                } catch (e) {
+                    console.error('Android clipboard bridge failed', e);
+                }
+            })();
+        """.trimIndent()
+
+        view.evaluateJavascript(script, null)
     }
 
     private fun handleWebPermissionRequest(request: PermissionRequest) {
