@@ -145,3 +145,29 @@ The configuration loader uses an explicit `java.util.Properties` import and expl
 This version declares Android TV/Leanback support, does not require a touchscreen, disables touch-only pull-to-refresh on TV devices, gives the WebView initial D-pad focus, and adds spatial D-pad/OK navigation for common links, buttons, and form controls.
 
 Build with Android Studio/Gradle and install the resulting APK on the TV.
+
+## Android TV build and installation
+
+The project includes explicit Android TV compatibility fixes. In particular, optional
+hardware features are marked `required=false` so permissions such as camera, microphone,
+telephony, Bluetooth, NFC, and location do not accidentally make a TV without that hardware
+look incompatible. A TV launcher banner is also included.
+
+The GitHub Actions workflow builds:
+
+- `*-debug.apk` for development/testing.
+- `*-tv-compatible-release.apk` as a **signed test release** using the standard debug signing
+  key, so it can be sideloaded without a private production keystore.
+
+For production distribution, replace the debug signing configuration with your own release
+keystore before publishing.
+
+To diagnose a TV installation error locally:
+
+```bash
+./tools/install-on-android-tv.sh path/to/app-release.apk
+```
+
+If Android TV still reports `App not installed`, use the exact `Failure [INSTALL_FAILED_...]`
+line printed by ADB. A generic TV dialog does not contain enough information to distinguish a
+signature conflict, version downgrade, ABI mismatch, or another PackageManager error.
