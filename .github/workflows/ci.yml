@@ -58,14 +58,13 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-
-      - name: Generate Gradle wrapper
-        run: gradle wrapper --gradle-version 8.10.2
+        with:
+          gradle-version: "8.10.2"
 
       - name: Build APK
         shell: bash
         run: |
-          ./gradlew assembleDebug \
+          gradle assembleDebug \
             -PWEB_URL="$WEB_URL" \
             -PAPP_NAME="$APP_NAME" \
             -PPACKAGE_NAME="$PACKAGE_NAME" \

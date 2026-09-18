@@ -66,28 +66,39 @@ class MainActivity : AppCompatActivity() {
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
                 runOnUiThread {
-                    val resources = request.resources.toSet()
+                    val requestedResources = request.resources.toSet()
+                    val allowedResources = mutableSetOf<String>()
                     val permissions = mutableListOf<String>()
 
-                    if (resources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) &&
+                    if (requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) &&
                         BuildConfig.PERMISSION_CAMERA) {
+                        allowedResources += PermissionRequest.RESOURCE_VIDEO_CAPTURE
                         permissions += Manifest.permission.CAMERA
                     }
-                    if (resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) &&
+                    if (requestedResources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) &&
                         BuildConfig.PERMISSION_MICROPHONE) {
+                        allowedResources += PermissionRequest.RESOURCE_AUDIO_CAPTURE
                         permissions += Manifest.permission.RECORD_AUDIO
                     }
 
-                    if (permissions.all {
-                            ContextCompat.checkSelfPermission(this@MainActivity, it) ==
-                                PackageManager.PERMISSION_GRANTED
-                        }) {
-                        request.grant(resources.toTypedArray())
+                    // Never grant a WebView resource that is disabled by app configuration.
+                    if (allowedResources.isEmpty()) {
+                        request.deny()
+                        return@runOnUiThread
+                    }
+
+                    val missingPermissions = permissions.distinct().filter {
+                        ContextCompat.checkSelfPermission(this@MainActivity, it) !=
+                            PackageManager.PERMISSION_GRANTED
+                    }
+
+                    if (missingPermissions.isEmpty()) {
+                        request.grant(allowedResources.toTypedArray())
                     } else {
                         permissionCallback = request
                         ActivityCompat.requestPermissions(
                             this@MainActivity,
-                            permissions.toTypedArray(),
+                            missingPermissions.toTypedArray(),
                             permissionRequestCode
                         )
                     }
@@ -102,13 +113,19 @@ class MainActivity : AppCompatActivity() {
                 if (!BuildConfig.ENABLE_FILE_UPLOAD) return false
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
+                val chooserIntent = try {
+                    params?.createIntent()?.apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                    }
+                } catch (_: Exception) {
+                    null
+                } ?: run {
+                    fileCallback = null
+                    return false
+                }
+
                 return try {
-                    startActivityForResult(
-                        params?.createIntent()?.apply {
-                            addCategory(Intent.CATEGORY_OPENABLE)
-                        },
-                        fileRequestCode
-                    )
+                    startActivityForResult(chooserIntent, fileRequestCode)
                     true
                 } catch (_: Exception) {
                     fileCallback = null
@@ -191,7 +208,17 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == permissionRequestCode) {
             permissionCallback?.let { request ->
                 if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                    request.grant(request.resources)
+                    val grantedResources = request.resources.filter { resource ->
+                        (resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE &&
+                            BuildConfig.PERMISSION_CAMERA) ||
+                        (resource == PermissionRequest.RESOURCE_AUDIO_CAPTURE &&
+                            BuildConfig.PERMISSION_MICROPHONE)
+                    }
+                    if (grantedResources.isNotEmpty()) {
+                        request.grant(grantedResources.toTypedArray())
+                    } else {
+                        request.deny()
+                    }
                 } else {
                     request.deny()
                 }
