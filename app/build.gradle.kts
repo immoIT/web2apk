@@ -73,7 +73,9 @@ android {
         manifestPlaceholders["orientation"] = orientationValue
 
         buildConfigField("String", "WEB_URL", javaStringLiteral(prop("WEB_URL", "https://example.com")))
-        buildConfigField("String", "APP_NAME", javaStringLiteral(prop("APP_NAME", "Website To APK")))
+        val appNameValue = prop("APP_NAME", "Website To APK")
+        buildConfigField("String", "APP_NAME", javaStringLiteral(appNameValue))
+        manifestPlaceholders["appName"] = appNameValue
         buildConfigField("boolean", "ENABLE_JAVASCRIPT", booleanProp("ENABLE_JAVASCRIPT", true))
         buildConfigField("boolean", "ENABLE_DOM_STORAGE", booleanProp("ENABLE_DOM_STORAGE", true))
         buildConfigField("boolean", "ENABLE_PULL_TO_REFRESH", booleanProp("ENABLE_PULL_TO_REFRESH", true))
