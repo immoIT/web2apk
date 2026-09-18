@@ -32,6 +32,8 @@ Create these repository variables:
 - `ENABLE_DOWNLOADS`
 - `ENABLE_FILE_UPLOAD`
 - `ENABLE_FULLSCREEN_VIDEO`
+- `ENABLE_FULLSCREEN`
+- `ENABLE_CLIPBOARD`
 - `ENABLE_LOGGING`
 
 ### Android permissions
@@ -81,6 +83,8 @@ This is a WebView wrapper, not a native conversion of website source code.
 - `ENABLE_DOWNLOADS` = `true`
 - `ENABLE_FILE_UPLOAD` = `true`
 - `ENABLE_FULLSCREEN_VIDEO` = `true`
+- `ENABLE_FULLSCREEN` = `true`
+- `ENABLE_CLIPBOARD` = `true`
 - `ENABLE_LOGGING` = `true`
 - `PERMISSION_INTERNET` = `true`
 - `PERMISSION_CAMERA` = `false`

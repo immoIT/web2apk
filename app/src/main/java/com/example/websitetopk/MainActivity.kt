@@ -3,6 +3,8 @@ package com.example.websitetopk
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -80,14 +82,17 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        applyFullscreenMode()
-        configureClipboardSupport()
-        log("onCreate: package=${packageName}, sdk=${Build.VERSION.SDK_INT}, fullscreen=${BuildConfig.ENABLE_FULLSCREEN}, clipboard=${BuildConfig.ENABLE_CLIPBOARD}, startUrl=$startUrl")
-
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webView)
         progressBar = findViewById(R.id.progressBar)
         swipeRefresh = findViewById(R.id.swipeRefresh)
+
+        // Configure window/UI features only after the views have been inflated.
+        // Clipboard support accesses webView, so it must never run before
+        // setContentView()/findViewById().
+        applyFullscreenMode()
+        configureClipboardSupport()
+        log("onCreate: package=${packageName}, sdk=${Build.VERSION.SDK_INT}, fullscreen=${BuildConfig.ENABLE_FULLSCREEN}, clipboard=${BuildConfig.ENABLE_CLIPBOARD}, startUrl=$startUrl")
 
         swipeRefresh.isEnabled = BuildConfig.ENABLE_PULL_TO_REFRESH
         swipeRefresh.setOnRefreshListener {
@@ -122,21 +127,27 @@ class MainActivity : AppCompatActivity() {
     private fun configureClipboardSupport() {
         if (!BuildConfig.ENABLE_CLIPBOARD) return
 
-        // Explicitly enable WebView text selection/context actions and bridge
-        // Android's clipboard service for reliable copy/paste behavior.
+        // Keep Android/WebView's normal text-selection actions available and
+        // add a reliable Paste action backed by Android's clipboard service.
         webView.setOnLongClickListener { false }
         webView.isLongClickable = true
         webView.isHapticFeedbackEnabled = true
 
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            ?: return
+
         webView.setOnCreateContextMenuListener { menu, _ ->
             if (clipboard.hasPrimaryClip()) {
                 menu.add("Paste").setOnMenuItemClickListener {
-                    val clip = clipboard.primaryClip
-                    val text = clip?.getItemAt(0)?.coerceToText(this)?.toString()
+                    val text = clipboard.primaryClip
+                        ?.getItemAt(0)
+                        ?.coerceToText(this)
+                        ?.toString()
+
                     if (!text.isNullOrEmpty()) {
+                        val quotedText = org.json.JSONObject.quote(text)
                         webView.evaluateJavascript(
-                            "document.execCommand('insertText', false, ${org.json.JSONObject.quote(text)})",
+                            "document.execCommand('insertText', false, $quotedText)",
                             null
                         )
                     }
@@ -151,11 +162,17 @@ class MainActivity : AppCompatActivity() {
 
         if (BuildConfig.ENABLE_FULLSCREEN) {
             WindowCompat.setDecorFitsSystemWindows(window, false)
-            controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+            controller.hide(
+                WindowInsetsCompat.Type.statusBars() or
+                    WindowInsetsCompat.Type.navigationBars()
+            )
             controller.systemBarsBehavior =
                 WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         } else {
-            controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+            controller.show(
+                WindowInsetsCompat.Type.statusBars() or
+                    WindowInsetsCompat.Type.navigationBars()
+            )
         }
     }
 
