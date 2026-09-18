@@ -17,6 +17,7 @@ Create these repository variables:
 ### Main
 - `WEB_URL`
 - `APP_NAME`
+- `APP_ICON_URL`
 - `PACKAGE_NAME`
 - `VERSION_NAME`
 - `VERSION_CODE`
@@ -68,6 +69,7 @@ This is a WebView wrapper, not a native conversion of website source code.
 
 - `WEB_URL` = `https://example.com`
 - `APP_NAME` = `BoltDownloader`
+- `APP_ICON_URL` = empty (uses the bundled default icon)
 - `PACKAGE_NAME` = `com.boltdownloader.app`
 - `VERSION_NAME` = `1.0.0`
 - `VERSION_CODE` = `1`
@@ -96,6 +98,8 @@ This is a WebView wrapper, not a native conversion of website source code.
 - `PERMISSION_NFC` = `false`
 
 Replace `WEB_URL` with the actual BoltDownloader website URL, either in GitHub Actions Variables or directly in the workflow default.
+
+`APP_ICON_URL` should be a direct HTTP(S) link to a PNG, JPG, or GIF image. During the GitHub Actions build, the image is downloaded, center-cropped to a square, resized to 512×512, and embedded into the APK as the launcher icon. If `APP_ICON_URL` is empty, the bundled default icon is used.
 
 ## Build diagnostics
 

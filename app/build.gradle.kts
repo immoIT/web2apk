@@ -1,38 +1,3 @@
-plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
-
-fun prop(name: String, default: String): String =
-    project.findProperty(name)?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: default
-
-fun booleanProp(name: String, default: Boolean): String {
-    val raw = project.findProperty(name)?.toString()?.trim()?.lowercase()
-    return when (raw) {
-        null, "" -> default.toString()
-        "true", "1", "yes", "y", "on" -> "true"
-        "false", "0", "no", "n", "off" -> "false"
-        else -> error("Invalid boolean value for $name: '$raw'. Use true/false, yes/no, on/off, or 1/0.")
-    }
-}
-
-fun javaStringLiteral(value: String): String = buildString {
-    append('"')
-    value.forEach { ch ->
-        when (ch) {
-            '\\' -> append("\\\\")
-            '"' -> append("\\\"")
-            '\n' -> append("\\n")
-            '\r' -> append("\\r")
-            '\t' -> append("\\t")
-            '\b' -> append("\\b")
-            '\u000C' -> append("\\f")
-            else -> append(ch)
-        }
-    }
-    append('"')
-}
-
 val applicationIdValue = prop("PACKAGE_NAME", "com.example.websitetopk").also {
     require(Regex("[a-zA-Z_][a-zA-Z0-9_]*(\\.[a-zA-Z_][a-zA-Z0-9_]*)+").matches(it)) {
         "Invalid PACKAGE_NAME '$it'. Use a Java-style application id such as com.example.myapp."
