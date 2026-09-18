@@ -242,24 +242,108 @@ jobs:
             echo 'BuildConfig validation passed.'
           } 2>&1 | tee build-logs/06-buildconfig.log
 
-      - name: Verify APK
+      - name: Build signed test release APK
         run: |
           set -Eeuo pipefail
           {
-            APK='app/build/outputs/apk/debug/app-debug.apk'
-            echo "=== Checking $APK ==="
-            test -s "$APK" || { echo 'ERROR: APK missing or empty'; exit 1; }
-            ls -lh "$APK"
+            echo '=== Starting assembleRelease ==='
+            gradle :app:assembleRelease --no-daemon --max-workers=2 --stacktrace --info --warning-mode all \
+              -PWEB_URL="$WEB_URL" \
+              -PAPP_NAME="$APP_NAME" \
+              -PPACKAGE_NAME="$PACKAGE_NAME" \
+              -PVERSION_NAME="$VERSION_NAME" \
+              -PVERSION_CODE="$VERSION_CODE" \
+              -PMIN_SDK="$MIN_SDK" \
+              -PTARGET_SDK="$TARGET_SDK" \
+              -PORIENTATION="$ORIENTATION" \
+              -PENABLE_JAVASCRIPT="$ENABLE_JAVASCRIPT" \
+              -PENABLE_DOM_STORAGE="$ENABLE_DOM_STORAGE" \
+              -PENABLE_PULL_TO_REFRESH="$ENABLE_PULL_TO_REFRESH" \
+              -PALLOW_EXTERNAL_LINKS="$ALLOW_EXTERNAL_LINKS" \
+              -PENABLE_DOWNLOADS="$ENABLE_DOWNLOADS" \
+              -PENABLE_FILE_UPLOAD="$ENABLE_FILE_UPLOAD" \
+              -PENABLE_FULLSCREEN_VIDEO="$ENABLE_FULLSCREEN_VIDEO" \
+              -PENABLE_FULLSCREEN="$ENABLE_FULLSCREEN" \
+              -PENABLE_CUSTOM_SCRIPTS="$ENABLE_CUSTOM_SCRIPTS" \
+              -PENABLE_LOGGING="$ENABLE_LOGGING" \
+              -PPERMISSION_CAMERA="$PERMISSION_CAMERA" \
+              -PPERMISSION_MICROPHONE="$PERMISSION_MICROPHONE" \
+              -PPERMISSION_LOCATION="$PERMISSION_LOCATION" \
+              -PPERMISSION_NOTIFICATIONS="$PERMISSION_NOTIFICATIONS" \
+              -PPERMISSION_STORAGE="$PERMISSION_STORAGE" \
+              -PPERMISSION_CONTACTS="$PERMISSION_CONTACTS" \
+              -PPERMISSION_PHONE="$PERMISSION_PHONE" \
+              -PPERMISSION_CALENDAR="$PERMISSION_CALENDAR" \
+              -PPERMISSION_BLUETOOTH="$PERMISSION_BLUETOOTH" \
+              -PPERMISSION_VIBRATE="$PERMISSION_VIBRATE" \
+              -PPERMISSION_NFC="$PERMISSION_NFC"
+            echo '=== Release build completed ==='
+          } 2>&1 | tee build-logs/06-assemble-release.log
+
+      - name: Verify APKs and Android TV compatibility
+        run: |
+          set -Eeuo pipefail
+          {
+            DEBUG_APK='app/build/outputs/apk/debug/app-debug.apk'
+            RELEASE_APK='app/build/outputs/apk/release/app-release.apk'
+            test -s "$DEBUG_APK" || { echo 'ERROR: debug APK missing or empty'; exit 1; }
+            test -s "$RELEASE_APK" || { echo 'ERROR: signed release APK missing or empty'; exit 1; }
+            ls -lh "$DEBUG_APK" "$RELEASE_APK"
+
+            # GitHub runners do not always put Android build-tools binaries on PATH.
+            # Resolve them explicitly so verification never fails with
+            # `apksigner: command not found` after a successful APK build.
+            APKSIGNER=''
+            ZIPALIGN=''
+            APKANALYZER=''
+            while IFS= read -r candidate; do
+              APKSIGNER="$candidate"
+              break
+            done < <(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools" -type f -name apksigner -perm -111 2>/dev/null | sort -V -r)
+            while IFS= read -r candidate; do
+              ZIPALIGN="$candidate"
+              break
+            done < <(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools" -type f -name zipalign -perm -111 2>/dev/null | sort -V -r)
             if command -v apkanalyzer >/dev/null 2>&1; then
-              echo '=== APK summary ==='
-              apkanalyzer apk summary "$APK"
-              echo '=== APK manifest ==='
-              apkanalyzer manifest application-id "$APK"
-              apkanalyzer manifest version-name "$APK"
-              apkanalyzer manifest version-code "$APK"
+              APKANALYZER="$(command -v apkanalyzer)"
             else
-              echo 'WARNING: apkanalyzer not found; skipping APK metadata inspection.'
+              while IFS= read -r candidate; do
+                APKANALYZER="$candidate"
+                break
+              done < <(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/cmdline-tools" -type f -name apkanalyzer -perm -111 2>/dev/null | sort -V -r)
             fi
+
+            test -n "$APKSIGNER" && test -x "$APKSIGNER" || {
+              echo 'ERROR: Android build-tools apksigner was not found.'
+              find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools" -maxdepth 2 -type f -name 'apksigner*' -print 2>/dev/null || true
+              exit 1
+            }
+            echo "Using apksigner: $APKSIGNER"
+            if [[ -n "$ZIPALIGN" ]]; then echo "Using zipalign: $ZIPALIGN"; fi
+
+            for APK in "$DEBUG_APK" "$RELEASE_APK"; do
+              echo "=== APK summary: $APK ==="
+              if [[ -n "$APKANALYZER" ]]; then
+                "$APKANALYZER" apk summary "$APK"
+                echo '--- application id ---'
+                "$APKANALYZER" manifest application-id "$APK"
+                echo '--- version name ---'
+                "$APKANALYZER" manifest version-name "$APK"
+                echo '--- version code ---'
+                "$APKANALYZER" manifest version-code "$APK"
+                echo '--- manifest / TV features ---'
+                "$APKANALYZER" manifest print "$APK" | grep -E 'uses-feature|LEANBACK_LAUNCHER|LAUNCHER|android:banner|android:required|android:touchscreen|android:camera|android:microphone|android:telephony|android:nfc' || true
+              fi
+              echo '--- APK signing certificates ---'
+              "$APKSIGNER" verify --verbose "$APK"
+              echo '--- zip alignment ---'
+              if [[ -n "$ZIPALIGN" ]]; then
+                "$ZIPALIGN" -c -v 4 "$APK"
+              fi
+            done
+
+            echo '=== Release APK is signed ==='
+            "$APKSIGNER" verify --print-certs "$RELEASE_APK"
           } 2>&1 | tee build-logs/07-apk-verification.log
 
       - name: Prepare APK and diagnostic bundle
@@ -269,6 +353,9 @@ jobs:
           mkdir -p dist diagnostics
           if [[ -f app/build/outputs/apk/debug/app-debug.apk ]]; then
             cp app/build/outputs/apk/debug/app-debug.apk "dist/${APP_NAME// /-}-debug.apk"
+          fi
+          if [[ -f app/build/outputs/apk/release/app-release.apk ]]; then
+            cp app/build/outputs/apk/release/app-release.apk "dist/${APP_NAME// /-}-tv-compatible-release.apk"
           fi
           {
             echo '=== Git status ==='
