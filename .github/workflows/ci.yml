@@ -1,0 +1,294 @@
+name: Build Website APK
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      WEB_URL: ${{ vars.WEB_URL || 'https://example.com' }}
+      APP_NAME: ${{ vars.APP_NAME || 'BoltDownloader' }}
+      PACKAGE_NAME: ${{ vars.PACKAGE_NAME || 'com.boltdownloader.app' }}
+      VERSION_NAME: ${{ vars.VERSION_NAME || '1.0.0' }}
+      VERSION_CODE: ${{ vars.VERSION_CODE || '1' }}
+      MIN_SDK: ${{ vars.MIN_SDK || '24' }}
+      TARGET_SDK: ${{ vars.TARGET_SDK || '35' }}
+      ORIENTATION: ${{ vars.ORIENTATION || 'unspecified' }}
+      ENABLE_JAVASCRIPT: ${{ vars.ENABLE_JAVASCRIPT || 'true' }}
+      ENABLE_DOM_STORAGE: ${{ vars.ENABLE_DOM_STORAGE || 'true' }}
+      ENABLE_PULL_TO_REFRESH: ${{ vars.ENABLE_PULL_TO_REFRESH || 'true' }}
+      ALLOW_EXTERNAL_LINKS: ${{ vars.ALLOW_EXTERNAL_LINKS || 'true' }}
+      ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS || 'true' }}
+      ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD || 'true' }}
+      ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO || 'true' }}
+      ENABLE_LOGGING: ${{ vars.ENABLE_LOGGING || 'true' }}
+      PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA || 'false' }}
+      PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE || 'false' }}
+      PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION || 'false' }}
+      PERMISSION_NOTIFICATIONS: ${{ vars.PERMISSION_NOTIFICATIONS || 'false' }}
+      PERMISSION_STORAGE: ${{ vars.PERMISSION_STORAGE || 'false' }}
+      PERMISSION_CONTACTS: ${{ vars.PERMISSION_CONTACTS || 'false' }}
+      PERMISSION_PHONE: ${{ vars.PERMISSION_PHONE || 'false' }}
+      PERMISSION_CALENDAR: ${{ vars.PERMISSION_CALENDAR || 'false' }}
+      PERMISSION_BLUETOOTH: ${{ vars.PERMISSION_BLUETOOTH || 'false' }}
+      PERMISSION_VIBRATE: ${{ vars.PERMISSION_VIBRATE || 'true' }}
+      PERMISSION_NFC: ${{ vars.PERMISSION_NFC || 'false' }}
+      GRADLE_VERSION: '8.10.2'
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install required Android SDK packages
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build-logs
+          {
+            echo '=== sdkmanager --version ==='
+            sdkmanager --version
+            echo '=== Installing SDK packages ==='
+            yes | sdkmanager --licenses >/dev/null || true
+            sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+            echo '=== Installed SDK packages ==='
+            sdkmanager --list_installed | sed -n '1,120p'
+          } 2>&1 | tee build-logs/01-android-sdk.log
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: Print build environment
+        run: |
+          set -Eeuo pipefail
+          {
+            echo '=== Git ==='
+            git --version
+            git rev-parse --short HEAD
+            echo '=== Java ==='
+            java -version
+            echo '=== Gradle ==='
+            gradle --version
+            echo '=== Android SDK ==='
+            echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-unset}"
+            echo '=== Repository ==='
+            find . -maxdepth 3 -type f -not -path './.git/*' -print | sort
+          } 2>&1 | tee build-logs/02-environment.log
+
+      - name: Validate configuration
+        run: |
+          set -Eeuo pipefail
+          {
+            echo '=== Configuration validation ==='
+            test -n "$WEB_URL" || { echo 'ERROR: WEB_URL is empty'; exit 1; }
+            [[ "$WEB_URL" =~ ^https?:// ]] || { echo "ERROR: WEB_URL must start with http:// or https://: $WEB_URL"; exit 1; }
+            [[ "$PACKAGE_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$ ]] || { echo "ERROR: Invalid PACKAGE_NAME: $PACKAGE_NAME"; exit 1; }
+            [[ "$VERSION_CODE" =~ ^[0-9]+$ ]] && (( VERSION_CODE > 0 )) || { echo "ERROR: VERSION_CODE must be a positive integer: $VERSION_CODE"; exit 1; }
+            [[ "$MIN_SDK" =~ ^[0-9]+$ ]] && (( MIN_SDK >= 21 )) || { echo "ERROR: MIN_SDK must be >= 21: $MIN_SDK"; exit 1; }
+            [[ "$TARGET_SDK" =~ ^[0-9]+$ ]] && (( TARGET_SDK >= MIN_SDK )) || { echo "ERROR: TARGET_SDK must be >= MIN_SDK: $TARGET_SDK"; exit 1; }
+            for value in ENABLE_JAVASCRIPT ENABLE_DOM_STORAGE ENABLE_PULL_TO_REFRESH ALLOW_EXTERNAL_LINKS ENABLE_DOWNLOADS ENABLE_FILE_UPLOAD ENABLE_FULLSCREEN_VIDEO ENABLE_LOGGING PERMISSION_CAMERA PERMISSION_MICROPHONE PERMISSION_LOCATION PERMISSION_NOTIFICATIONS PERMISSION_STORAGE PERMISSION_CONTACTS PERMISSION_PHONE PERMISSION_CALENDAR PERMISSION_BLUETOOTH PERMISSION_VIBRATE PERMISSION_NFC; do
+              current="${!value}"
+              case "${current,,}" in
+                true|false|1|0|yes|no|y|n|on|off) ;;
+                *) echo "ERROR: Invalid boolean $value='$current'"; exit 1 ;;
+              esac
+            done
+            echo 'Configuration is valid.'
+            echo "WEB_URL=$WEB_URL"
+            echo "APP_NAME=$APP_NAME"
+            echo "PACKAGE_NAME=$PACKAGE_NAME"
+            echo "VERSION_NAME=$VERSION_NAME"
+            echo "VERSION_CODE=$VERSION_CODE"
+            echo "MIN_SDK=$MIN_SDK TARGET_SDK=$TARGET_SDK ORIENTATION=$ORIENTATION"
+          } 2>&1 | tee build-logs/03-config-validation.log
+
+      - name: Validate Gradle configuration
+        run: |
+          set -Eeuo pipefail
+          {
+            echo '=== Gradle tasks ==='
+            gradle :app:tasks --all --no-daemon --stacktrace --warning-mode all
+          } 2>&1 | tee build-logs/04-gradle-validation.log
+
+      - name: Preflight resource and Kotlin compilation
+        run: |
+          set -Eeuo pipefail
+          mkdir -p build-logs
+          status=0
+          echo '=== Resource compilation preflight ==='
+          set +e
+          gradle :app:processDebugResources --no-daemon --max-workers=2 --stacktrace --info --warning-mode all 2>&1 | tee build-logs/05a-resource-preflight.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "Resource preflight exit code: $rc"
+          (( rc == 0 )) || status=1
+
+          echo '=== Kotlin compilation preflight ==='
+          set +e
+          gradle :app:compileDebugKotlin --no-daemon --max-workers=2 --stacktrace --info --warning-mode all 2>&1 | tee build-logs/05b-kotlin-preflight.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "Kotlin preflight exit code: $rc"
+          (( rc == 0 )) || status=1
+
+          echo '=== Preflight failure extraction ==='
+          grep -RniE 'Execution failed for task|A failure occurred while executing|Could not compile|Compilation error|Resource compilation failed|Android resource linking failed|error:|e: |Caused by:|FAILURE:' build-logs/05a-resource-preflight.log build-logs/05b-kotlin-preflight.log 2>/dev/null | tail -n 250 || true
+          exit "$status"
+
+      - name: Build debug APK
+        run: |
+          set -Eeuo pipefail
+          {
+            echo '=== Starting assembleDebug ==='
+            gradle :app:assembleDebug --no-daemon --max-workers=2 --stacktrace --info --warning-mode all \
+              -PWEB_URL="$WEB_URL" \
+              -PAPP_NAME="$APP_NAME" \
+              -PPACKAGE_NAME="$PACKAGE_NAME" \
+              -PVERSION_NAME="$VERSION_NAME" \
+              -PVERSION_CODE="$VERSION_CODE" \
+              -PMIN_SDK="$MIN_SDK" \
+              -PTARGET_SDK="$TARGET_SDK" \
+              -PORIENTATION="$ORIENTATION" \
+              -PENABLE_JAVASCRIPT="$ENABLE_JAVASCRIPT" \
+              -PENABLE_DOM_STORAGE="$ENABLE_DOM_STORAGE" \
+              -PENABLE_PULL_TO_REFRESH="$ENABLE_PULL_TO_REFRESH" \
+              -PALLOW_EXTERNAL_LINKS="$ALLOW_EXTERNAL_LINKS" \
+              -PENABLE_DOWNLOADS="$ENABLE_DOWNLOADS" \
+              -PENABLE_FILE_UPLOAD="$ENABLE_FILE_UPLOAD" \
+              -PENABLE_FULLSCREEN_VIDEO="$ENABLE_FULLSCREEN_VIDEO" \
+              -PENABLE_LOGGING="$ENABLE_LOGGING" \
+              -PPERMISSION_CAMERA="$PERMISSION_CAMERA" \
+              -PPERMISSION_MICROPHONE="$PERMISSION_MICROPHONE" \
+              -PPERMISSION_LOCATION="$PERMISSION_LOCATION" \
+              -PPERMISSION_NOTIFICATIONS="$PERMISSION_NOTIFICATIONS" \
+              -PPERMISSION_STORAGE="$PERMISSION_STORAGE" \
+              -PPERMISSION_CONTACTS="$PERMISSION_CONTACTS" \
+              -PPERMISSION_PHONE="$PERMISSION_PHONE" \
+              -PPERMISSION_CALENDAR="$PERMISSION_CALENDAR" \
+              -PPERMISSION_BLUETOOTH="$PERMISSION_BLUETOOTH" \
+              -PPERMISSION_VIBRATE="$PERMISSION_VIBRATE" \
+              -PPERMISSION_NFC="$PERMISSION_NFC"
+            echo '=== Build completed ==='
+          } 2>&1 | tee build-logs/05-assemble-debug.log
+
+      - name: Verify generated BuildConfig
+        run: |
+          set -Eeuo pipefail
+          {
+            BUILD_CONFIG='app/build/generated/source/buildConfig/debug/com/example/websitetopk/BuildConfig.java'
+            echo "=== Checking $BUILD_CONFIG ==="
+            test -f "$BUILD_CONFIG" || { echo 'ERROR: BuildConfig.java was not generated'; exit 1; }
+            grep -nE 'public static final (String|boolean) ' "$BUILD_CONFIG"
+            if grep -nE '= (True|False);' "$BUILD_CONFIG"; then
+              echo 'ERROR: Invalid Java boolean literal found in generated BuildConfig'
+              exit 1
+            fi
+            echo 'BuildConfig validation passed.'
+          } 2>&1 | tee build-logs/06-buildconfig.log
+
+      - name: Verify APK
+        run: |
+          set -Eeuo pipefail
+          {
+            APK='app/build/outputs/apk/debug/app-debug.apk'
+            echo "=== Checking $APK ==="
+            test -s "$APK" || { echo 'ERROR: APK missing or empty'; exit 1; }
+            ls -lh "$APK"
+            if command -v apkanalyzer >/dev/null 2>&1; then
+              echo '=== APK summary ==='
+              apkanalyzer apk summary "$APK"
+              echo '=== APK manifest ==='
+              apkanalyzer manifest application-id "$APK"
+              apkanalyzer manifest version-name "$APK"
+              apkanalyzer manifest version-code "$APK"
+            else
+              echo 'WARNING: apkanalyzer not found; skipping APK metadata inspection.'
+            fi
+          } 2>&1 | tee build-logs/07-apk-verification.log
+
+      - name: Prepare APK and diagnostic bundle
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          mkdir -p dist diagnostics
+          if [[ -f app/build/outputs/apk/debug/app-debug.apk ]]; then
+            cp app/build/outputs/apk/debug/app-debug.apk "dist/${APP_NAME// /-}-debug.apk"
+          fi
+          {
+            echo '=== Git status ==='
+            git status --short
+            echo '=== Build outputs ==='
+            find app/build/outputs -type f -maxdepth 5 -print 2>/dev/null | sort || true
+            echo '=== Root-cause markers ==='
+            grep -RniE 'Execution failed for task|A failure occurred while executing|Could not compile|Compilation error|Resource compilation failed|Android resource linking failed|error:|e: |FAILURE:|Caused by:' build-logs app/build 2>/dev/null | tail -n 400 || true
+            echo '=== Recent Gradle errors/warnings ==='
+            grep -RniE '(^|[[:space:]])(ERROR|FAILURE|Exception|Caused by:|warning:)' build-logs app/build 2>/dev/null | tail -n 400 || true
+            echo '=== Manifest merger report ==='
+            if [[ -f app/build/outputs/logs/manifest-merger-debug-report.txt ]]; then
+              cat app/build/outputs/logs/manifest-merger-debug-report.txt
+            fi
+            echo '=== AAPT/resource reports ==='
+            find app/build -type f \( -name '*.xml' -o -name '*.txt' -o -name '*.html' \) -path '*reports*' -print 2>/dev/null | sort | while read -r f; do
+              echo "--- $f ---"
+              grep -niE 'error|failure|exception|resource' "$f" 2>/dev/null | tail -n 80 || true
+            done
+          } 2>&1 | tee build-logs/08-diagnostics.log
+          cp -r build-logs diagnostics/build-logs
+          if [[ -d app/build/reports ]]; then cp -r app/build/reports diagnostics/; fi
+          if [[ -d app/build/test-results ]]; then cp -r app/build/test-results diagnostics/; fi
+          tar -czf diagnostics.tar.gz diagnostics
+          ls -lh dist diagnostics.tar.gz || true
+
+      - name: Upload APK artifact
+        if: success() && hashFiles('dist/*.apk') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: website-to-apk
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: website-to-apk-build-logs
+          path: |
+            build-logs/**
+            diagnostics.tar.gz
+            app/build/reports/**
+            app/build/test-results/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Print failure summary
+        if: failure()
+        run: |
+          set +e
+          echo '================ BUILD FAILED ================'
+          echo 'Step logs are available in the website-to-apk-build-logs artifact.'
+          echo 'Last errors/warnings:'
+          grep -RniE '(^|[[:space:]])(ERROR|FAILURE|Exception|Caused by:|warning:)' build-logs app/build 2>/dev/null | tail -n 200 || true
+          echo '================================================'
