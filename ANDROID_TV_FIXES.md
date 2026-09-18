@@ -29,3 +29,13 @@ adb install -r app-release-unsigned.apk
 
 Common remaining causes are an existing copy signed with a different key or a version-code
 that is newer on the TV. In those cases the source APK itself is not the incompatibility.
+
+## CI verification fix
+
+The APK build itself can succeed while the verification step fails if `apksigner` is not on `PATH`.
+The workflow now resolves `apksigner` directly from the installed Android SDK Build Tools and also
+checks APK alignment and certificates. This prevents a false build failure after `assembleRelease`
+succeeds.
+
+Use `tools/verify-apk.sh path/to/app.apk` on a machine with the Android SDK installed for the same
+verification locally.
