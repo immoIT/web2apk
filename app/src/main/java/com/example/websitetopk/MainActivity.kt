@@ -26,6 +26,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivity : AppCompatActivity() {
@@ -76,7 +79,9 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        log("onCreate: package=${packageName}, sdk=${Build.VERSION.SDK_INT}, startUrl=$startUrl")
+
+        applyFullscreenMode()
+        log("onCreate: package=${packageName}, sdk=${Build.VERSION.SDK_INT}, fullscreen=${BuildConfig.ENABLE_FULLSCREEN}, startUrl=$startUrl")
 
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webView)
@@ -111,6 +116,19 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    private fun applyFullscreenMode() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+
+        if (BuildConfig.ENABLE_FULLSCREEN) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")

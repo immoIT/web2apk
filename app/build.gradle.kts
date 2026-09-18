@@ -81,6 +81,7 @@ android {
         buildConfigField("boolean", "ENABLE_DOWNLOADS", booleanProp("ENABLE_DOWNLOADS", true))
         buildConfigField("boolean", "ENABLE_FILE_UPLOAD", booleanProp("ENABLE_FILE_UPLOAD", true))
         buildConfigField("boolean", "ENABLE_FULLSCREEN_VIDEO", booleanProp("ENABLE_FULLSCREEN_VIDEO", true))
+        buildConfigField("boolean", "ENABLE_FULLSCREEN", booleanProp("ENABLE_FULLSCREEN", true))
         buildConfigField("boolean", "ENABLE_LOGGING", booleanProp("ENABLE_LOGGING", true))
         buildConfigField("boolean", "PERMISSION_CAMERA", booleanProp("PERMISSION_CAMERA", false))
         buildConfigField("boolean", "PERMISSION_MICROPHONE", booleanProp("PERMISSION_MICROPHONE", false))
