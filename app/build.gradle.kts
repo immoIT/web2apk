@@ -138,7 +138,7 @@ val syncWeb2ApkCustomResources = tasks.register("syncWeb2ApkCustomResources") {
 
         val scripts = if (requestedJsFiles.isNotEmpty()) {
             requestedJsFiles.map { relativePath ->
-                val normalized = relativePath.replace('\\\\', '/').removePrefix("./")
+                val normalized = relativePath.replace('\\', '/').removePrefix("./")
                 require(!normalized.split('/').any { it == ".." }) {
                     "CUSTOM_JS_FILES contains a path outside custom/: '$relativePath'"
                 }
