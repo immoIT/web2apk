@@ -1,15 +1,20 @@
-# Website To APK — Optional Variables Edition
+# Website To APK — GitHub Variables
 
 This repository wraps a website in an Android WebView and builds the APK through GitHub Actions.
 
-## Optional variables
+## Configuration
 
-You do NOT have to create any GitHub Actions variables. Built-in defaults are used.
+**All configuration comes from GitHub Actions repository variables.**
 
-If a repository variable exists, it overrides the default.
+Go to:
 
-### Main variables
+**GitHub → Repository → Settings → Secrets and variables → Actions → Variables**
 
+The repository variables are optional because the workflow includes defaults.
+
+Create these repository variables:
+
+### Main
 - `WEB_URL`
 - `APP_NAME`
 - `PACKAGE_NAME`
@@ -20,7 +25,6 @@ If a repository variable exists, it overrides the default.
 - `ORIENTATION`
 
 ### WebView
-
 - `ENABLE_JAVASCRIPT`
 - `ENABLE_DOM_STORAGE`
 - `ENABLE_PULL_TO_REFRESH`
@@ -30,7 +34,6 @@ If a repository variable exists, it overrides the default.
 - `ENABLE_FULLSCREEN_VIDEO`
 
 ### Android permissions
-
 - `PERMISSION_INTERNET`
 - `PERMISSION_CAMERA`
 - `PERMISSION_MICROPHONE`
@@ -44,32 +47,50 @@ If a repository variable exists, it overrides the default.
 - `PERMISSION_VIBRATE`
 - `PERMISSION_NFC`
 
-All permission variables default to `false`, except Internet which defaults to `true`.
-
-## Configure
-
-You can either:
-
-1. Do nothing and use defaults.
-2. Add GitHub repository variables under Settings → Secrets and variables → Actions → Variables.
-3. Use `config.yml` as a human-readable configuration reference.
-
-The workflow always has fallback values, so missing variables do not break the build.
+Every setting has a project default in the workflow. If a GitHub Actions repository variable with the same name is set, that GitHub variable overrides the project default. There is no `config.yml` configuration path.
 
 ## Build
 
-Push to GitHub. Then open:
+Push to GitHub, then open:
 
-Actions → Build Website APK
+**Actions → Build Website APK**
 
-Download the `website-to-apk` artifact.
+The generated APK is uploaded as the `website-to-apk` artifact.
 
-You can also use **Run workflow** and optionally supply a website URL.
+`-P` in the Gradle command is intentional: it passes each GitHub variable to Gradle as a project property.
 
-## Important
+## Notes
 
 This is a WebView wrapper, not a native conversion of website source code.
 
-Website clicks, JavaScript interactions, forms, SPA navigation, and normal HTTP/HTTPS links work through WebView. Camera, microphone, location and other device features require both Android permission configuration and support from the website.
+### Project defaults
 
-For Play Store production releases, configure app signing and review the permissions you enable.
+- `WEB_URL` = `https://example.com`
+- `APP_NAME` = `BoltDownloader`
+- `PACKAGE_NAME` = `com.boltdownloader.app`
+- `VERSION_NAME` = `1.0.0`
+- `VERSION_CODE` = `1`
+- `MIN_SDK` = `24`
+- `TARGET_SDK` = `35`
+- `ORIENTATION` = `unspecified`
+- `ENABLE_JAVASCRIPT` = `true`
+- `ENABLE_DOM_STORAGE` = `true`
+- `ENABLE_PULL_TO_REFRESH` = `true`
+- `ALLOW_EXTERNAL_LINKS` = `true`
+- `ENABLE_DOWNLOADS` = `true`
+- `ENABLE_FILE_UPLOAD` = `true`
+- `ENABLE_FULLSCREEN_VIDEO` = `true`
+- `PERMISSION_INTERNET` = `true`
+- `PERMISSION_CAMERA` = `false`
+- `PERMISSION_MICROPHONE` = `false`
+- `PERMISSION_LOCATION` = `false`
+- `PERMISSION_NOTIFICATIONS` = `false`
+- `PERMISSION_STORAGE` = `false`
+- `PERMISSION_CONTACTS` = `false`
+- `PERMISSION_PHONE` = `false`
+- `PERMISSION_CALENDAR` = `false`
+- `PERMISSION_BLUETOOTH` = `false`
+- `PERMISSION_VIBRATE` = `true`
+- `PERMISSION_NFC` = `false`
+
+Replace `WEB_URL` with the actual BoltDownloader website URL, either in GitHub Actions Variables or directly in the workflow default.
