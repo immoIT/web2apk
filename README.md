@@ -127,3 +127,10 @@ The custom script bridge is injected only on the configured trusted host, matchi
 ## Diagnostics
 
 The GitHub workflow keeps detailed Gradle, resource, Kotlin, APK, and environment diagnostics under `build-logs/` and uploads the diagnostic bundle even when a build fails.
+
+### Configuration defaults and GitHub Actions variables
+
+`config/defaults.properties` provides fallback values for local and CI builds.
+GitHub Actions repository variables with the same names override those defaults
+when they are non-empty. Empty/unset variables fall back to the defaults file,
+so booleans such as `ALLOW_EXTERNAL_LINKS` never become an empty string.
