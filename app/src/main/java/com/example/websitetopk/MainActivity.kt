@@ -364,7 +364,7 @@ class MainActivity : AppCompatActivity() {
         permissionCallback = null
         webView.stopLoading()
         webView.webChromeClient = null
-        webView.webViewClient = null
+        // WebViewClient is non-null by Android API contract; do not assign null here.
         webView.destroy()
         super.onDestroy()
     }
