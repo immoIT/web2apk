@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.webkit.JavascriptInterface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,7 +23,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.net.http.SslError
-import android.widget.ProgressBar
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -40,12 +42,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var webView: WebView
-    private lateinit var progressBar: ProgressBar
     private lateinit var swipeRefresh: SwipeRefreshLayout
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var permissionCallback: PermissionRequest? = null
     private var pendingWebResources: Array<String> = emptyArray()
+    private val clipboardManager by lazy {
+        getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+    }
 
     private val startUrl = BuildConfig.WEB_URL
 
@@ -85,7 +89,6 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webView)
-        progressBar = findViewById(R.id.progressBar)
         swipeRefresh = findViewById(R.id.swipeRefresh)
 
         swipeRefresh.isEnabled = BuildConfig.ENABLE_PULL_TO_REFRESH
@@ -94,6 +97,7 @@ class MainActivity : AppCompatActivity() {
             webView.reload()
         }
 
+        webView.addJavascriptInterface(WebClipboardBridge(), "AndroidClipboard")
         configureWebView()
         requestConfiguredPermissions()
 
@@ -200,12 +204,11 @@ class MainActivity : AppCompatActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 log("Page started: $url")
-                progressBar.visibility = View.VISIBLE
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 log("Page finished: $url")
-                progressBar.visibility = View.GONE
+                injectClipboardSupport(view)
                 swipeRefresh.isRefreshing = false
             }
 
@@ -217,7 +220,6 @@ class MainActivity : AppCompatActivity() {
                 super.onReceivedError(view, request, error)
                 logError("Web resource error: mainFrame=${request?.isForMainFrame}, url=${request?.url}, code=${error?.errorCode}, description=${error?.description}")
                 if (request?.isForMainFrame == true) {
-                    progressBar.visibility = View.GONE
                     swipeRefresh.isRefreshing = false
                 }
             }
@@ -260,6 +262,223 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
+    }
+
+    private inner class WebClipboardBridge {
+        @JavascriptInterface
+        fun readText(): String {
+            if (!isTrustedPage()) {
+                log("Clipboard read blocked: current page is not the configured trusted host")
+                return ""
+            }
+
+            return try {
+                if (!clipboardManager.hasPrimaryClip()) {
+                    log("Clipboard read: no primary clip")
+                    ""
+                } else {
+                    val text = clipboardManager.primaryClip
+                        ?.getItemAt(0)
+                        ?.coerceToText(this@MainActivity)
+                        ?.toString()
+                        .orEmpty()
+                    log("Clipboard read: ${text.length} characters")
+                    text
+                }
+            } catch (t: Throwable) {
+                logError("Clipboard read failed", t)
+                ""
+            }
+        }
+
+        @JavascriptInterface
+        fun writeText(text: String?) {
+            if (!isTrustedPage()) {
+                log("Clipboard write blocked: current page is not the configured trusted host")
+                return
+            }
+
+            try {
+                val value = text.orEmpty()
+                clipboardManager.setPrimaryClip(ClipData.newPlainText("WebView", value))
+                log("Clipboard write: ${value.length} characters")
+            } catch (t: Throwable) {
+                logError("Clipboard write failed", t)
+            }
+        }
+    }
+
+    private fun isTrustedPage(): Boolean {
+        val currentHost = runCatching { Uri.parse(webView.url ?: startUrl).host }.getOrNull()
+        val trustedHost = runCatching { Uri.parse(startUrl).host }.getOrNull()
+        return !trustedHost.isNullOrEmpty() && currentHost == trustedHost
+    }
+
+    private fun injectClipboardSupport(view: WebView?) {
+        if (view == null || !isTrustedPage()) return
+
+        val script = """
+            (function() {
+                try {
+                    if (!window.AndroidClipboard) return;
+
+                    // Always refresh the bridge. Some web apps replace navigator.clipboard
+                    // during startup, so a one-time injection is not reliable.
+                    var nativeClipboard = {
+                        readText: function() {
+                            try {
+                                return Promise.resolve(String(window.AndroidClipboard.readText() || ''));
+                            } catch (e) {
+                                console.error('Native clipboard read failed', e);
+                                return Promise.resolve('');
+                            }
+                        },
+                        writeText: function(text) {
+                            try {
+                                window.AndroidClipboard.writeText(String(text == null ? '' : text));
+                            } catch (e) {
+                                console.error('Native clipboard write failed', e);
+                            }
+                            return Promise.resolve();
+                        }
+                    };
+
+                    try {
+                        Object.defineProperty(navigator, 'clipboard', {
+                            configurable: true,
+                            enumerable: true,
+                            get: function() { return nativeClipboard; }
+                        });
+                    } catch (e) {
+                        try { navigator.clipboard = nativeClipboard; } catch (_) {}
+                    }
+
+                    // Make the native clipboard available to paste buttons/icons too.
+                    // This handles apps that do not call navigator.clipboard.readText()
+                    // themselves when the user taps a Paste control.
+                    if (!window.__androidPasteHandlerInstalled) {
+                        window.__androidPasteHandlerInstalled = true;
+
+                        function isPasteControl(el) {
+                            if (!el || !el.closest) return false;
+                            var control = el.closest('button, [role="button"], input[type="button"], input[type="submit"], a');
+                            if (!control) return false;
+
+                            var text = [
+                                control.innerText || '',
+                                control.getAttribute('aria-label') || '',
+                                control.getAttribute('title') || '',
+                                control.getAttribute('data-action') || ''
+                            ].join(' ').toLowerCase();
+
+                            return /\bpaste\b/.test(text);
+                        }
+
+                        function insertTextIntoTarget(text) {
+                            var target = document.activeElement;
+
+                            // If the Paste icon/button itself has focus, use the most
+                            // recently focused editable element instead.
+                            if (!target || !(
+                                target.tagName === 'INPUT' ||
+                                target.tagName === 'TEXTAREA' ||
+                                target.isContentEditable
+                            )) {
+                                target = window.__androidLastEditableElement;
+                            }
+
+                            if (!target) return false;
+
+                            try {
+                                if (target.isContentEditable) {
+                                    target.focus();
+                                    document.execCommand('insertText', false, text);
+                                    return true;
+                                }
+
+                                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                                    var start = typeof target.selectionStart === 'number'
+                                        ? target.selectionStart : target.value.length;
+                                    var end = typeof target.selectionEnd === 'number'
+                                        ? target.selectionEnd : target.value.length;
+
+                                    var value = target.value || '';
+                                    target.focus();
+                                    var newValue = value.slice(0, start) + text + value.slice(end);
+
+                                    // Use the native setter so controlled inputs (for
+                                    // example React/Vue forms) also observe the change.
+                                    var proto = target.tagName === 'TEXTAREA'
+                                        ? HTMLTextAreaElement.prototype
+                                        : HTMLInputElement.prototype;
+                                    var setter = Object.getOwnPropertyDescriptor(proto, 'value');
+                                    if (setter && setter.set) {
+                                        setter.set.call(target, newValue);
+                                    } else {
+                                        target.value = newValue;
+                                    }
+
+                                    var cursor = start + text.length;
+                                    try {
+                                        target.setSelectionRange(cursor, cursor);
+                                    } catch (_) {}
+
+                                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                            } catch (e) {
+                                console.error('Paste insertion failed', e);
+                            }
+                            return false;
+                        }
+
+                        document.addEventListener('focusin', function(event) {
+                            var el = event.target;
+                            if (el && (
+                                el.tagName === 'INPUT' ||
+                                el.tagName === 'TEXTAREA' ||
+                                el.isContentEditable
+                            )) {
+                                window.__androidLastEditableElement = el;
+                            }
+                        }, true);
+
+                        document.addEventListener('click', function(event) {
+                            if (!isPasteControl(event.target)) return;
+
+                            // Read the Android clipboard at click time, while the
+                            // Activity/WebView is foregrounded, then populate the
+                            // focused field. Do not block the site's own click handler.
+                            try {
+                                var text = String(window.AndroidClipboard.readText() || '');
+                                if (text) insertTextIntoTarget(text);
+                            } catch (e) {
+                                console.error('Paste button handling failed', e);
+                            }
+                        }, true);
+                    }
+                } catch (e) {
+                    console.error('Android clipboard bridge failed', e);
+                }
+            })();
+        """.trimIndent()
+
+        view.evaluateJavascript(script, null)
+
+        // Re-apply after SPA/framework startup code has had a chance to replace
+        // navigator.clipboard. This is intentionally short-lived.
+        view.postDelayed({
+            if (!isFinishing && !isDestroyed && isTrustedPage()) {
+                view.evaluateJavascript(script, null)
+            }
+        }, 500)
+
+        view.postDelayed({
+            if (!isFinishing && !isDestroyed && isTrustedPage()) {
+                view.evaluateJavascript(script, null)
+            }
+        }, 1500)
     }
 
     private fun handleWebPermissionRequest(request: PermissionRequest) {
