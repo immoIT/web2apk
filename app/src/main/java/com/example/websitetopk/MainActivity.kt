@@ -13,6 +13,9 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.View
+import android.view.ViewGroup
+import android.view.KeyEvent
+import android.content.res.Configuration
 import android.webkit.ConsoleMessage
 import android.webkit.PermissionRequest
 import android.webkit.SslErrorHandler
@@ -53,6 +56,10 @@ class MainActivity : AppCompatActivity() {
 
     private val startUrl = BuildConfig.WEB_URL
 
+    /** True on Android TV / Leanback devices. */
+    private val isTvDevice: Boolean
+        get() = (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+
     private fun log(message: String) {
         if (BuildConfig.ENABLE_LOGGING) Log.d(TAG, message)
     }
@@ -91,7 +98,14 @@ class MainActivity : AppCompatActivity() {
         webView = findViewById(R.id.webView)
         swipeRefresh = findViewById(R.id.swipeRefresh)
 
-        swipeRefresh.isEnabled = BuildConfig.ENABLE_PULL_TO_REFRESH
+        // Make the WebView the initial remote-focus target on Android TV.
+        webView.isFocusable = true
+        webView.isFocusableInTouchMode = true
+        webView.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        webView.requestFocus(View.FOCUS_DOWN)
+
+        // Pull-to-refresh is a touch gesture and can consume D-pad events on TV.
+        swipeRefresh.isEnabled = BuildConfig.ENABLE_PULL_TO_REFRESH && !isTvDevice
         swipeRefresh.setOnRefreshListener {
             log("Pull-to-refresh: reload requested")
             webView.reload()
@@ -210,6 +224,7 @@ class MainActivity : AppCompatActivity() {
                 log("Page finished: $url")
                 injectClipboardSupport(view)
                 injectCustomScripts(view)
+                injectTvNavigation(view)
                 swipeRefresh.isRefreshing = false
             }
 
@@ -480,6 +495,113 @@ class MainActivity : AppCompatActivity() {
                 view.evaluateJavascript(script, null)
             }
         }, 1500)
+    }
+
+    /**
+     * Adds spatial D-pad navigation for pages that were designed primarily for touch.
+     * Normal text-entry arrow behavior is preserved inside editable controls.
+     */
+    private fun injectTvNavigation(view: WebView?) {
+        if (!isTvDevice || view == null || !isTrustedPage()) return
+
+        val script = """
+            (function() {
+                if (window.__androidTvNavigationInstalled) return;
+                window.__androidTvNavigationInstalled = true;
+
+                function editable(el) {
+                    if (!el) return false;
+                    var tag = (el.tagName || '').toLowerCase();
+                    return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+                }
+
+                function focusables() {
+                    var nodes = Array.prototype.slice.call(document.querySelectorAll(
+                        'a[href],button,input,textarea,select,[tabindex]:not([tabindex="-1"]),[role="button"]'
+                    ));
+                    return nodes.filter(function(el) {
+                        var r = el.getBoundingClientRect();
+                        var st = window.getComputedStyle(el);
+                        return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' &&
+                               st.display !== 'none' && !el.disabled &&
+                               el.getAttribute('aria-disabled') !== 'true';
+                    });
+                }
+
+                function move(direction) {
+                    var current = document.activeElement;
+                    var list = focusables();
+                    if (!list.length) return false;
+                    if (!current || current === document.body || list.indexOf(current) < 0) {
+                        list[0].focus({preventScroll:false});
+                        return true;
+                    }
+
+                    var a = current.getBoundingClientRect();
+                    var ax = a.left + a.width / 2;
+                    var ay = a.top + a.height / 2;
+                    var best = null;
+                    var bestScore = Infinity;
+
+                    list.forEach(function(el) {
+                        if (el === current) return;
+                        var r = el.getBoundingClientRect();
+                        var x = r.left + r.width / 2;
+                        var y = r.top + r.height / 2;
+                        var dx = x - ax, dy = y - ay;
+                        var primary, secondary;
+
+                        if (direction === 'left') { if (dx >= -2) return; primary = -dx; secondary = Math.abs(dy); }
+                        else if (direction === 'right') { if (dx <= 2) return; primary = dx; secondary = Math.abs(dy); }
+                        else if (direction === 'up') { if (dy >= -2) return; primary = -dy; secondary = Math.abs(dx); }
+                        else { if (dy <= 2) return; primary = dy; secondary = Math.abs(dx); }
+
+                        // Prefer elements in the direction of travel, then those aligned with it.
+                        var score = primary * primary + secondary * secondary * 1.8;
+                        if (score < bestScore) { bestScore = score; best = el; }
+                    });
+
+                    if (!best) return false;
+                    best.focus({preventScroll:false});
+                    try { best.scrollIntoView({block:'nearest', inline:'nearest'}); } catch (_) {}
+                    return true;
+                }
+
+                document.addEventListener('keydown', function(e) {
+                    var key = e.key;
+                    var el = document.activeElement;
+
+                    if (editable(el) && (key === 'ArrowLeft' || key === 'ArrowRight')) return;
+                    if (editable(el) && (key === 'ArrowUp' || key === 'ArrowDown') &&
+                        ((el.tagName || '').toLowerCase() === 'textarea' || el.isContentEditable)) return;
+
+                    if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown') {
+                        if (move(key.substring(5).toLowerCase())) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                    } else if (key === 'Enter' && el && el !== document.body) {
+                        var tag = (el.tagName || '').toLowerCase();
+                        if (tag === 'a' || tag === 'button' || el.getAttribute('role') === 'button') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            el.click();
+                        }
+                    }
+                }, true);
+
+                // Keep a visible focus ring even when the website has weak TV styling.
+                var style = document.createElement('style');
+                style.id = '__android_tv_focus_style';
+                style.textContent = '*:focus{outline:3px solid #ffffff !important;outline-offset:2px;}';
+                (document.head || document.documentElement).appendChild(style);
+            })();
+        """.trimIndent()
+
+        view.evaluateJavascript(script, null)
+        view.postDelayed({
+            if (!isFinishing && !isDestroyed && isTrustedPage()) view.evaluateJavascript(script, null)
+        }, 1200)
     }
 
     private fun injectCustomScripts(view: WebView?) {
