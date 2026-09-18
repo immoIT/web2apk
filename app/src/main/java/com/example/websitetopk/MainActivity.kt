@@ -6,11 +6,18 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.View
-import android.webkit.*
+import android.webkit.PermissionRequest
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.ProgressBar
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -21,12 +28,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
     private lateinit var swipeRefresh: SwipeRefreshLayout
+
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var permissionCallback: PermissionRequest? = null
+    private var pendingWebResources: Array<String> = emptyArray()
 
     private val startUrl = BuildConfig.WEB_URL
-    private val permissionRequestCode = 9001
-    private val fileRequestCode = 9002
+    private val configuredPermissionRequestCode = 9001
+    private val webPermissionRequestCode = 9002
+
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val callback = fileCallback ?: return@registerForActivityResult
+        fileCallback = null
+        val results = if (result.resultCode == Activity.RESULT_OK) {
+            WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+        } else {
+            null
+        }
+        callback.onReceiveValue(results)
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,7 +64,12 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView()
         requestConfiguredPermissions()
-        webView.loadUrl(startUrl)
+
+        if (savedInstanceState == null) {
+            webView.loadUrl(startUrl)
+        } else {
+            webView.restoreState(savedInstanceState)
+        }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -56,7 +83,6 @@ class MainActivity : AppCompatActivity() {
         webView.settings.apply {
             javaScriptEnabled = BuildConfig.ENABLE_JAVASCRIPT
             domStorageEnabled = BuildConfig.ENABLE_DOM_STORAGE
-            databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
             allowFileAccess = BuildConfig.ENABLE_FILE_UPLOAD
             allowContentAccess = BuildConfig.ENABLE_FILE_UPLOAD
@@ -65,44 +91,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
-                runOnUiThread {
-                    val requestedResources = request.resources.toSet()
-                    val allowedResources = mutableSetOf<String>()
-                    val permissions = mutableListOf<String>()
-
-                    if (requestedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) &&
-                        BuildConfig.PERMISSION_CAMERA) {
-                        allowedResources += PermissionRequest.RESOURCE_VIDEO_CAPTURE
-                        permissions += Manifest.permission.CAMERA
-                    }
-                    if (requestedResources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) &&
-                        BuildConfig.PERMISSION_MICROPHONE) {
-                        allowedResources += PermissionRequest.RESOURCE_AUDIO_CAPTURE
-                        permissions += Manifest.permission.RECORD_AUDIO
-                    }
-
-                    // Never grant a WebView resource that is disabled by app configuration.
-                    if (allowedResources.isEmpty()) {
-                        request.deny()
-                        return@runOnUiThread
-                    }
-
-                    val missingPermissions = permissions.distinct().filter {
-                        ContextCompat.checkSelfPermission(this@MainActivity, it) !=
-                            PackageManager.PERMISSION_GRANTED
-                    }
-
-                    if (missingPermissions.isEmpty()) {
-                        request.grant(allowedResources.toTypedArray())
-                    } else {
-                        permissionCallback = request
-                        ActivityCompat.requestPermissions(
-                            this@MainActivity,
-                            missingPermissions.toTypedArray(),
-                            permissionRequestCode
-                        )
-                    }
-                }
+                runOnUiThread { handleWebPermissionRequest(request) }
             }
 
             override fun onShowFileChooser(
@@ -110,25 +99,23 @@ class MainActivity : AppCompatActivity() {
                 callback: ValueCallback<Array<Uri>>?,
                 params: FileChooserParams?
             ): Boolean {
-                if (!BuildConfig.ENABLE_FILE_UPLOAD) return false
-                fileCallback?.onReceiveValue(null)
-                fileCallback = callback
-                val chooserIntent = try {
-                    params?.createIntent()?.apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                    }
-                } catch (_: Exception) {
-                    null
-                } ?: run {
-                    fileCallback = null
+                if (!BuildConfig.ENABLE_FILE_UPLOAD || callback == null || params == null) {
+                    callback?.onReceiveValue(null)
                     return false
                 }
 
+                fileCallback?.onReceiveValue(null)
+                fileCallback = callback
+
                 return try {
-                    startActivityForResult(chooserIntent, fileRequestCode)
+                    val intent = params.createIntent().apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                    }
+                    fileChooserLauncher.launch(intent)
                     true
                 } catch (_: Exception) {
                     fileCallback = null
+                    callback.onReceiveValue(null)
                     false
                 }
             }
@@ -136,8 +123,11 @@ class MainActivity : AppCompatActivity() {
 
         webView.setDownloadListener { url, _, _, _, _ ->
             if (BuildConfig.ENABLE_DOWNLOADS) {
-                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-                catch (_: Exception) {}
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                } catch (_: Exception) {
+                    // No browser/app is available for this URL.
+                }
             }
         }
 
@@ -151,51 +141,117 @@ class MainActivity : AppCompatActivity() {
                 swipeRefresh.isRefreshing = false
             }
 
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: android.webkit.WebResourceError?
+            ) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    progressBar.visibility = View.GONE
+                    swipeRefresh.isRefreshing = false
+                }
+            }
+
+            override fun shouldOverrideUrlLoading(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): Boolean {
                 val uri = request?.url ?: return false
                 if (uri.scheme == "http" || uri.scheme == "https") return false
+
                 if (BuildConfig.ALLOW_EXTERNAL_LINKS) {
-                    try { startActivity(Intent(Intent.ACTION_VIEW, uri)) } catch (_: Exception) {}
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, uri))
+                    } catch (_: Exception) {
+                        // No handler for this URI scheme.
+                    }
                 }
                 return true
             }
         }
     }
 
-    private fun requestConfiguredPermissions() {
-        val list = mutableListOf<String>()
-
-        if (BuildConfig.PERMISSION_CAMERA) list += Manifest.permission.CAMERA
-        if (BuildConfig.PERMISSION_MICROPHONE) list += Manifest.permission.RECORD_AUDIO
-        if (BuildConfig.PERMISSION_LOCATION) {
-            list += Manifest.permission.ACCESS_FINE_LOCATION
-            list += Manifest.permission.ACCESS_COARSE_LOCATION
+    private fun handleWebPermissionRequest(request: PermissionRequest) {
+        if (isFinishing || isDestroyed) {
+            request.deny()
+            return
         }
-        if (BuildConfig.PERMISSION_NOTIFICATIONS && android.os.Build.VERSION.SDK_INT >= 33) {
-            list += Manifest.permission.POST_NOTIFICATIONS
+
+        val allowedResources = request.resources.filter { resource ->
+            when (resource) {
+                PermissionRequest.RESOURCE_VIDEO_CAPTURE -> BuildConfig.PERMISSION_CAMERA
+                PermissionRequest.RESOURCE_AUDIO_CAPTURE -> BuildConfig.PERMISSION_MICROPHONE
+                else -> false
+            }
+        }.toTypedArray()
+
+        if (allowedResources.isEmpty()) {
+            request.deny()
+            return
+        }
+
+        val requiredPermissions = buildList {
+            if (allowedResources.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {
+                add(Manifest.permission.CAMERA)
+            }
+            if (allowedResources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) {
+                add(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+
+        val missingPermissions = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPermissions.isEmpty()) {
+            request.grant(allowedResources)
+        } else {
+            permissionCallback?.deny()
+            permissionCallback = request
+            pendingWebResources = allowedResources
+            ActivityCompat.requestPermissions(
+                this,
+                missingPermissions.toTypedArray(),
+                webPermissionRequestCode
+            )
+        }
+    }
+
+    private fun requestConfiguredPermissions() {
+        val requested = mutableListOf<String>()
+
+        if (BuildConfig.PERMISSION_CAMERA) requested += Manifest.permission.CAMERA
+        if (BuildConfig.PERMISSION_MICROPHONE) requested += Manifest.permission.RECORD_AUDIO
+        if (BuildConfig.PERMISSION_LOCATION) {
+            requested += Manifest.permission.ACCESS_FINE_LOCATION
+            requested += Manifest.permission.ACCESS_COARSE_LOCATION
+        }
+        if (BuildConfig.PERMISSION_NOTIFICATIONS && Build.VERSION.SDK_INT >= 33) {
+            requested += Manifest.permission.POST_NOTIFICATIONS
         }
         if (BuildConfig.PERMISSION_CONTACTS) {
-            list += Manifest.permission.READ_CONTACTS
-            list += Manifest.permission.WRITE_CONTACTS
+            requested += Manifest.permission.READ_CONTACTS
+            requested += Manifest.permission.WRITE_CONTACTS
         }
         if (BuildConfig.PERMISSION_CALENDAR) {
-            list += Manifest.permission.READ_CALENDAR
-            list += Manifest.permission.WRITE_CALENDAR
+            requested += Manifest.permission.READ_CALENDAR
+            requested += Manifest.permission.WRITE_CALENDAR
         }
         if (BuildConfig.PERMISSION_PHONE) {
-            list += Manifest.permission.READ_PHONE_STATE
-            list += Manifest.permission.CALL_PHONE
+            requested += Manifest.permission.READ_PHONE_STATE
+            requested += Manifest.permission.CALL_PHONE
         }
-        if (BuildConfig.PERMISSION_BLUETOOTH && android.os.Build.VERSION.SDK_INT >= 31) {
-            list += Manifest.permission.BLUETOOTH_CONNECT
-            list += Manifest.permission.BLUETOOTH_SCAN
+        if (BuildConfig.PERMISSION_BLUETOOTH && Build.VERSION.SDK_INT >= 31) {
+            requested += Manifest.permission.BLUETOOTH_CONNECT
+            requested += Manifest.permission.BLUETOOTH_SCAN
         }
 
-        val missing = list.distinct().filter {
+        val missing = requested.distinct().filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), permissionRequestCode)
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), configuredPermissionRequestCode)
         }
     }
 
@@ -205,42 +261,47 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == permissionRequestCode) {
-            permissionCallback?.let { request ->
-                if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                    val grantedResources = request.resources.filter { resource ->
-                        (resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE &&
-                            BuildConfig.PERMISSION_CAMERA) ||
-                        (resource == PermissionRequest.RESOURCE_AUDIO_CAPTURE &&
-                            BuildConfig.PERMISSION_MICROPHONE)
-                    }
-                    if (grantedResources.isNotEmpty()) {
-                        request.grant(grantedResources.toTypedArray())
-                    } else {
-                        request.deny()
-                    }
-                } else {
-                    request.deny()
-                }
-                permissionCallback = null
+
+        if (requestCode != configuredPermissionRequestCode && requestCode != webPermissionRequestCode) return
+
+        if (requestCode == configuredPermissionRequestCode) return
+
+        val request = permissionCallback ?: return
+        permissionCallback = null
+
+        val resources = pendingWebResources
+        pendingWebResources = emptyArray()
+
+        val allGranted = resources.all { resource ->
+            when (resource) {
+                PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                else -> false
             }
+        }
+
+        if (allGranted && resources.isNotEmpty()) {
+            request.grant(resources)
+        } else {
+            request.deny()
         }
     }
 
-    @Deprecated("Deprecated in Android API, retained for compatibility")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == fileRequestCode) {
-            val results = if (resultCode == Activity.RESULT_OK) {
-                WebChromeClient.FileChooserParams.parseResult(resultCode, data)
-            } else null
-            fileCallback?.onReceiveValue(results)
-            fileCallback = null
-        }
+    override fun onSaveInstanceState(outState: Bundle) {
+        webView.saveState(outState)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {
+        fileCallback?.onReceiveValue(null)
+        fileCallback = null
+        permissionCallback?.deny()
+        permissionCallback = null
         webView.stopLoading()
+        webView.webChromeClient = null
+        webView.webViewClient = null
         webView.destroy()
         super.onDestroy()
     }

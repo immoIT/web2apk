@@ -7,13 +7,12 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Configuration comes only from GitHub Actions repository variables.
       WEB_URL: ${{ vars.WEB_URL || 'https://example.com' }}
       APP_NAME: ${{ vars.APP_NAME || 'BoltDownloader' }}
       PACKAGE_NAME: ${{ vars.PACKAGE_NAME || 'com.boltdownloader.app' }}
@@ -29,7 +28,6 @@ jobs:
       ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS || 'true' }}
       ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD || 'true' }}
       ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO || 'true' }}
-      PERMISSION_INTERNET: ${{ vars.PERMISSION_INTERNET || 'true' }}
       PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA || 'false' }}
       PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE || 'false' }}
       PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION || 'false' }}
@@ -43,28 +41,36 @@ jobs:
       PERMISSION_NFC: ${{ vars.PERMISSION_NFC || 'false' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.10.2
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.10.2"
+          gradle-version: '8.10.2'
 
-      - name: Build APK
+      - name: Validate Gradle configuration
         shell: bash
         run: |
-          gradle assembleDebug \
+          gradle --version
+          gradle :app:tasks --all --no-daemon
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          gradle :app:assembleDebug --no-daemon --stacktrace \
             -PWEB_URL="$WEB_URL" \
             -PAPP_NAME="$APP_NAME" \
             -PPACKAGE_NAME="$PACKAGE_NAME" \
@@ -80,7 +86,6 @@ jobs:
             -PENABLE_DOWNLOADS="$ENABLE_DOWNLOADS" \
             -PENABLE_FILE_UPLOAD="$ENABLE_FILE_UPLOAD" \
             -PENABLE_FULLSCREEN_VIDEO="$ENABLE_FULLSCREEN_VIDEO" \
-            -PPERMISSION_INTERNET="$PERMISSION_INTERNET" \
             -PPERMISSION_CAMERA="$PERMISSION_CAMERA" \
             -PPERMISSION_MICROPHONE="$PERMISSION_MICROPHONE" \
             -PPERMISSION_LOCATION="$PERMISSION_LOCATION" \
@@ -93,11 +98,25 @@ jobs:
             -PPERMISSION_VIBRATE="$PERMISSION_VIBRATE" \
             -PPERMISSION_NFC="$PERMISSION_NFC"
 
+      - name: Verify generated BuildConfig
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_CONFIG="app/build/generated/source/buildConfig/debug/com/example/websitetopk/BuildConfig.java"
+          test -f "$BUILD_CONFIG"
+          if grep -nE '= (True|False);' "$BUILD_CONFIG"; then
+            echo "Invalid Java boolean literal found in generated BuildConfig"
+            exit 1
+          fi
+          grep -nE 'public static final boolean ' "$BUILD_CONFIG"
+
       - name: Prepare APK
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk "dist/${APP_NAME// /-}-debug.apk"
+          ls -lh dist/*.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
