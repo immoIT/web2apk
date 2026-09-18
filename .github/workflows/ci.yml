@@ -289,23 +289,61 @@ jobs:
             test -s "$DEBUG_APK" || { echo 'ERROR: debug APK missing or empty'; exit 1; }
             test -s "$RELEASE_APK" || { echo 'ERROR: signed release APK missing or empty'; exit 1; }
             ls -lh "$DEBUG_APK" "$RELEASE_APK"
+
+            # GitHub runners do not always put Android build-tools binaries on PATH.
+            # Resolve them explicitly so verification never fails with
+            # `apksigner: command not found` after a successful APK build.
+            APKSIGNER=''
+            ZIPALIGN=''
+            APKANALYZER=''
+            while IFS= read -r candidate; do
+              APKSIGNER="$candidate"
+              break
+            done < <(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools" -type f -name apksigner -perm -111 2>/dev/null | sort -V -r)
+            while IFS= read -r candidate; do
+              ZIPALIGN="$candidate"
+              break
+            done < <(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools" -type f -name zipalign -perm -111 2>/dev/null | sort -V -r)
             if command -v apkanalyzer >/dev/null 2>&1; then
-              for APK in "$DEBUG_APK" "$RELEASE_APK"; do
-                echo "=== APK summary: $APK ==="
-                apkanalyzer apk summary "$APK"
-                echo '--- application id ---'
-                apkanalyzer manifest application-id "$APK"
-                echo '--- version name ---'
-                apkanalyzer manifest version-name "$APK"
-                echo '--- version code ---'
-                apkanalyzer manifest version-code "$APK"
-                echo '--- manifest ---'
-                apkanalyzer manifest print "$APK" | grep -E 'uses-feature|LEANBACK_LAUNCHER|LAUNCHER|android:banner|android:touchscreen|android:camera|android:microphone|android:telephony|android:nfc' || true
-              done
+              APKANALYZER="$(command -v apkanalyzer)"
+            else
+              while IFS= read -r candidate; do
+                APKANALYZER="$candidate"
+                break
+              done < <(find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/cmdline-tools" -type f -name apkanalyzer -perm -111 2>/dev/null | sort -V -r)
             fi
-            echo '=== APK signing certificates ==='
-            apksigner verify --verbose "$DEBUG_APK"
-            apksigner verify --verbose "$RELEASE_APK"
+
+            test -n "$APKSIGNER" && test -x "$APKSIGNER" || {
+              echo 'ERROR: Android build-tools apksigner was not found.'
+              find "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}/build-tools" -maxdepth 2 -type f -name 'apksigner*' -print 2>/dev/null || true
+              exit 1
+            }
+            echo "Using apksigner: $APKSIGNER"
+            if [[ -n "$ZIPALIGN" ]]; then echo "Using zipalign: $ZIPALIGN"; fi
+
+            for APK in "$DEBUG_APK" "$RELEASE_APK"; do
+              echo "=== APK summary: $APK ==="
+              if [[ -n "$APKANALYZER" ]]; then
+                "$APKANALYZER" apk summary "$APK"
+                echo '--- application id ---'
+                "$APKANALYZER" manifest application-id "$APK"
+                echo '--- version name ---'
+                "$APKANALYZER" manifest version-name "$APK"
+                echo '--- version code ---'
+                "$APKANALYZER" manifest version-code "$APK"
+                echo '--- manifest / TV features ---'
+                "$APKANALYZER" manifest print "$APK" | grep -E 'uses-feature|LEANBACK_LAUNCHER|LAUNCHER|android:banner|android:required|android:touchscreen|android:camera|android:microphone|android:telephony|android:nfc' || true
+              fi
+              echo '--- APK signing certificates ---'
+              "$APKSIGNER" verify --verbose "$APK"
+              echo '--- zip alignment ---'
+              if [[ -n "$ZIPALIGN" ]]; then
+                "$ZIPALIGN" -c -v 4 "$APK"
+              fi
+            done
+
+            echo '=== Release APK is signed ==='
+            "$APKSIGNER" verify --print-certs "$RELEASE_APK"
           } 2>&1 | tee build-logs/07-apk-verification.log
 
       - name: Prepare APK and diagnostic bundle
