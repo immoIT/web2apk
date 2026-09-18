@@ -13,33 +13,35 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      WEB_URL: ${{ vars.WEB_URL || 'https://example.com' }}
-      APP_NAME: ${{ vars.APP_NAME || 'BoltDownloader' }}
-      PACKAGE_NAME: ${{ vars.PACKAGE_NAME || 'com.boltdownloader.app' }}
-      VERSION_NAME: ${{ vars.VERSION_NAME || '1.0.0' }}
-      VERSION_CODE: ${{ vars.VERSION_CODE || '1' }}
-      MIN_SDK: ${{ vars.MIN_SDK || '24' }}
-      TARGET_SDK: ${{ vars.TARGET_SDK || '35' }}
-      ORIENTATION: ${{ vars.ORIENTATION || 'unspecified' }}
-      ENABLE_JAVASCRIPT: ${{ vars.ENABLE_JAVASCRIPT || 'true' }}
-      ENABLE_DOM_STORAGE: ${{ vars.ENABLE_DOM_STORAGE || 'true' }}
-      ENABLE_PULL_TO_REFRESH: ${{ vars.ENABLE_PULL_TO_REFRESH || 'true' }}
-      ALLOW_EXTERNAL_LINKS: ${{ vars.ALLOW_EXTERNAL_LINKS || 'true' }}
-      ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS || 'true' }}
-      ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD || 'true' }}
-      ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO || 'true' }}
-      ENABLE_LOGGING: ${{ vars.ENABLE_LOGGING || 'true' }}
-      PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA || 'false' }}
-      PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE || 'false' }}
-      PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION || 'false' }}
-      PERMISSION_NOTIFICATIONS: ${{ vars.PERMISSION_NOTIFICATIONS || 'false' }}
-      PERMISSION_STORAGE: ${{ vars.PERMISSION_STORAGE || 'false' }}
-      PERMISSION_CONTACTS: ${{ vars.PERMISSION_CONTACTS || 'false' }}
-      PERMISSION_PHONE: ${{ vars.PERMISSION_PHONE || 'false' }}
-      PERMISSION_CALENDAR: ${{ vars.PERMISSION_CALENDAR || 'false' }}
-      PERMISSION_BLUETOOTH: ${{ vars.PERMISSION_BLUETOOTH || 'false' }}
-      PERMISSION_VIBRATE: ${{ vars.PERMISSION_VIBRATE || 'true' }}
-      PERMISSION_NFC: ${{ vars.PERMISSION_NFC || 'false' }}
+      WEB_URL: ${{ vars.WEB_URL || '' }}
+      APP_NAME: ${{ vars.APP_NAME || '' }}
+      PACKAGE_NAME: ${{ vars.PACKAGE_NAME || '' }}
+      VERSION_NAME: ${{ vars.VERSION_NAME || '' }}
+      VERSION_CODE: ${{ vars.VERSION_CODE || '' }}
+      MIN_SDK: ${{ vars.MIN_SDK || '' }}
+      TARGET_SDK: ${{ vars.TARGET_SDK || '' }}
+      ORIENTATION: ${{ vars.ORIENTATION || '' }}
+      ENABLE_JAVASCRIPT: ${{ vars.ENABLE_JAVASCRIPT || '' }}
+      ENABLE_DOM_STORAGE: ${{ vars.ENABLE_DOM_STORAGE || '' }}
+      ENABLE_PULL_TO_REFRESH: ${{ vars.ENABLE_PULL_TO_REFRESH || '' }}
+      ALLOW_EXTERNAL_LINKS: ${{ vars.ALLOW_EXTERNAL_LINKS || '' }}
+      ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS || '' }}
+      ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD || '' }}
+      ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO || '' }}
+      ENABLE_FULLSCREEN: ${{ vars.ENABLE_FULLSCREEN || '' }}
+      ENABLE_CUSTOM_SCRIPTS: ${{ vars.ENABLE_CUSTOM_SCRIPTS || '' }}
+      ENABLE_LOGGING: ${{ vars.ENABLE_LOGGING || '' }}
+      PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA || '' }}
+      PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE || '' }}
+      PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION || '' }}
+      PERMISSION_NOTIFICATIONS: ${{ vars.PERMISSION_NOTIFICATIONS || '' }}
+      PERMISSION_STORAGE: ${{ vars.PERMISSION_STORAGE || '' }}
+      PERMISSION_CONTACTS: ${{ vars.PERMISSION_CONTACTS || '' }}
+      PERMISSION_PHONE: ${{ vars.PERMISSION_PHONE || '' }}
+      PERMISSION_CALENDAR: ${{ vars.PERMISSION_CALENDAR || '' }}
+      PERMISSION_BLUETOOTH: ${{ vars.PERMISSION_BLUETOOTH || '' }}
+      PERMISSION_VIBRATE: ${{ vars.PERMISSION_VIBRATE || '' }}
+      PERMISSION_NFC: ${{ vars.PERMISSION_NFC || '' }}
       GRADLE_VERSION: '8.10.2'
 
     defaults:
@@ -178,6 +180,8 @@ jobs:
               -PENABLE_DOWNLOADS="$ENABLE_DOWNLOADS" \
               -PENABLE_FILE_UPLOAD="$ENABLE_FILE_UPLOAD" \
               -PENABLE_FULLSCREEN_VIDEO="$ENABLE_FULLSCREEN_VIDEO" \
+              -PENABLE_FULLSCREEN="$ENABLE_FULLSCREEN" \
+              -PENABLE_CUSTOM_SCRIPTS="$ENABLE_CUSTOM_SCRIPTS" \
               -PENABLE_LOGGING="$ENABLE_LOGGING" \
               -PPERMISSION_CAMERA="$PERMISSION_CAMERA" \
               -PPERMISSION_MICROPHONE="$PERMISSION_MICROPHONE" \
