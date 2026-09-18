@@ -42,7 +42,6 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "WebsiteToAPK"
         private const val CONFIGURED_PERMISSION_REQUEST_CODE = 9001
         private const val WEB_PERMISSION_REQUEST_CODE = 9002
-        private const val DOUBLE_BACK_WINDOW_MS = 600L
     }
 
     private lateinit var webView: WebView
@@ -50,7 +49,6 @@ class MainActivity : AppCompatActivity() {
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var permissionCallback: PermissionRequest? = null
-    private var lastBackPressAt = 0L
     private var pendingWebResources: Array<String> = emptyArray()
     private val clipboardManager by lazy {
         getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
@@ -127,16 +125,6 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val now = android.os.SystemClock.elapsedRealtime()
-                val isDoubleBack = now - lastBackPressAt <= DOUBLE_BACK_WINDOW_MS
-                lastBackPressAt = now
-
-                if (isDoubleBack) {
-                    log("Double back detected: showing video controls")
-                    showVideoControlsFromDoubleBack()
-                    return
-                }
-
                 if (webView.canGoBack()) {
                     log("Back: navigating WebView history")
                     webView.goBack()
@@ -146,15 +134,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
-    }
-
-    private fun showVideoControlsFromDoubleBack() {
-        if (isFinishing || isDestroyed || !isTrustedPage()) return
-
-        webView.evaluateJavascript(
-            "(function(){window.dispatchEvent(new Event('web2apk-double-back'));})()",
-            null
-        )
     }
 
     private fun applyFullscreenMode() {
@@ -629,16 +608,27 @@ class MainActivity : AppCompatActivity() {
         if (!BuildConfig.ENABLE_CUSTOM_SCRIPTS || view == null || !isTrustedPage()) return
 
         try {
-            val script = assets.open("web2apk-custom.js").bufferedReader().use { it.readText() }
-            if (script.isBlank()) return
+            val files = assets.open("web2apk-custom-files.txt").bufferedReader().useLines { lines ->
+                lines.map { it.trim() }.filter { it.isNotEmpty() }.toList()
+            }
 
-            log("Injecting custom WebView script (${script.length} characters)")
-            view.evaluateJavascript(
-                "(function(){try{\n$script\n}catch(e){console.error('web2apk custom script failed',e);}})();",
-                null
-            )
+            if (files.isEmpty()) return
+
+            log("Injecting ${files.size} custom WebView JS file(s): ${files.joinToString()}")
+            files.forEach { fileName ->
+                val script = assets.open("custom-js/$fileName").bufferedReader().use { it.readText() }
+                if (script.isBlank()) return@forEach
+
+                // Each configured file is evaluated separately, in the same order
+                // used during the build. This keeps generated JS files independent
+                // inside the APK while still injecting all of them into the page.
+                view.evaluateJavascript(
+                    "(function(){try{\n$script\n}catch(e){console.error('web2apk custom script failed: $fileName',e);}})();",
+                    null
+                )
+            }
         } catch (_: java.io.FileNotFoundException) {
-            // No custom script was uploaded. This is a valid/default configuration.
+            // No custom JS files were selected/generated. This is a valid/default configuration.
         } catch (t: Throwable) {
             logError("Custom WebView script injection failed", t)
         }

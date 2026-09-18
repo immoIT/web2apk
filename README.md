@@ -9,6 +9,8 @@ All manual customization lives under `web2apk/custom/`:
 ```text
 custom/
 ├── icon.png                 # upload your own app icon (optional)
+├── generated-a.js           # optional JS file
+├── generated-b.js           # optional JS file
 └── scripts/
     ├── 01-startup.js
     └── 02-custom-ui.js
@@ -27,7 +29,23 @@ The first supported icon found is used automatically. If no icon is present, a b
 
 ### Custom WebView scripts
 
-Put any `.js` files in `custom/scripts/`. The build combines them in filename order and packages them as `web2apk-custom.js`. The app injects that script after the configured website finishes loading.
+You can deploy one or multiple generated `.js` files into the APK.
+
+Use the GitHub Actions variable:
+
+```text
+CUSTOM_JS_FILES=generated-a.js,generated-b.js
+```
+
+The paths are relative to `custom/`, so this also works:
+
+```text
+CUSTOM_JS_FILES=generated/app.js,generated/ui.js,scripts/extra.js
+```
+
+Each selected file is copied into the APK under `assets/custom-js/` and injected after the configured website finishes loading, in the exact order listed in `CUSTOM_JS_FILES`.
+
+If `CUSTOM_JS_FILES` is empty, the backward-compatible behavior is used: every `.js` file under `custom/scripts/` is included in filename order.
 
 Set:
 
@@ -91,6 +109,7 @@ Supported variables include:
 - `ENABLE_FULLSCREEN_VIDEO`
 - `ENABLE_FULLSCREEN`
 - `ENABLE_CUSTOM_SCRIPTS`
+- `CUSTOM_JS_FILES` — comma-separated `.js` paths relative to `custom/`
 - `ENABLE_LOGGING`
 
 ### Permissions
