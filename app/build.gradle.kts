@@ -195,11 +195,22 @@ android {
 
     buildTypes {
         release {
+            // A signed test-release artifact is useful for sideloading on TV.
+            // It uses the standard debug key only when no production signing
+            // configuration is supplied; replace this with your own keystore for
+            // Play Store/production distribution.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
         }
     }
 

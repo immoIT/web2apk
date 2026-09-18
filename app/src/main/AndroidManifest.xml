@@ -5,6 +5,20 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- Optional hardware declarations are important for Android TV. Some Android
+         permissions imply hardware features; explicitly marking them optional
+         prevents PackageManager/TV devices without those peripherals from treating
+         the APK as incompatible. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -26,6 +40,7 @@
         android:allowBackup="true"
         android:label="${appName}"
         android:icon="@drawable/web2apk_icon"
+        android:banner="@drawable/web2apk_tv_banner"
         android:supportsRtl="true"
         android:theme="@style/Theme.WebsiteToAPK"
         android:usesCleartextTraffic="false"
