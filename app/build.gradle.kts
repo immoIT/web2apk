@@ -1,10 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+val defaultsFile = rootProject.file("config/defaults.properties")
+val defaults = Properties().apply {
+    if (defaultsFile.isFile) {
+        defaultsFile.inputStream().use { input -> load(input) }
+    }
+}
+
 fun prop(name: String, default: String): String =
-    project.findProperty(name)?.toString()?.trim()?.takeIf { it.isNotEmpty() } ?: default
+    project.findProperty(name)?.toString()?.trim()?.takeIf { value -> value.isNotEmpty() }
+        ?: defaults.getProperty(name)?.trim()?.takeIf { value -> value.isNotEmpty() }
+        ?: default
 
 fun booleanProp(name: String, default: Boolean): String {
     val raw = project.findProperty(name)?.toString()?.trim()?.lowercase()
@@ -59,6 +70,85 @@ require(orientationValue in validOrientations) {
     "Invalid ORIENTATION '$orientationValue'. Allowed values: ${validOrientations.joinToString()}."
 }
 
+// Files placed in `custom/` are optional and are intended for manual customization.
+// They are generated into Android's build directories so the source tree stays clean.
+val customDir = rootProject.file("custom")
+val customScriptsDir = customDir.resolve("scripts")
+val generatedCustomResDir = layout.buildDirectory.dir("generated/web2apk/res")
+val generatedCustomAssetsDir = layout.buildDirectory.dir("generated/web2apk/assets")
+
+val syncWeb2ApkCustomResources = tasks.register("syncWeb2ApkCustomResources") {
+    outputs.dirs(generatedCustomResDir, generatedCustomAssetsDir)
+
+    doLast {
+        val generatedRes = generatedCustomResDir.get().asFile
+        val generatedAssets = generatedCustomAssetsDir.get().asFile
+
+        project.delete(generatedRes, generatedAssets)
+        generatedRes.mkdirs()
+        generatedAssets.mkdirs()
+
+        // Optional launcher icon:
+        // custom/icon.png (or .jpg/.jpeg/.webp) -> @drawable/web2apk_icon
+        val icon = listOf("icon.png", "icon.webp", "icon.jpg", "icon.jpeg")
+            .map(customDir::resolve)
+            .firstOrNull { it.isFile }
+
+        val drawableDir = generatedRes.resolve("drawable").apply { mkdirs() }
+        if (icon != null) {
+            project.copy {
+                from(icon)
+                into(drawableDir)
+                rename { "web2apk_icon.${icon.extension.lowercase()}" }
+            }
+        } else {
+            drawableDir.resolve("web2apk_icon.xml").writeText("""
+                <?xml version="1.0" encoding="utf-8"?>
+                <vector xmlns:android="http://schemas.android.com/apk/res/android"
+                    android:width="108dp"
+                    android:height="108dp"
+                    android:viewportWidth="108"
+                    android:viewportHeight="108">
+                    <path
+                        android:fillColor="#FFFFFF"
+                        android:pathData="M0,0h108v108h-108z" />
+                    <path
+                        android:fillColor="#3F51B5"
+                        android:pathData="M24,20h60c2.2,0 4,1.8 4,4v60c0,2.2 -1.8,4 -4,4h-60c-2.2,0 -4,-1.8 -4,-4v-60c0,-2.2 1.8,-4 4,-4z" />
+                    <path
+                        android:fillColor="#FFFFFF"
+                        android:pathData="M34,36h40v6h-40zM34,51h40v6h-40zM34,66h26v6h-26z" />
+                </vector>
+            """.trimIndent())
+        }
+
+        // Optional WebView JavaScript files. Every *.js file is combined into
+        // one asset and injected after the page finishes loading.
+        if (customScriptsDir.isDirectory) {
+            val scripts = customScriptsDir.walkTopDown()
+                .filter { it.isFile && it.extension.equals("js", ignoreCase = true) }
+                .sortedBy { it.relativeTo(customScriptsDir).path }
+                .toList()
+
+            if (scripts.isNotEmpty()) {
+                generatedAssets.resolve("web2apk-custom.js").writeText(
+                    scripts.joinToString("\n\n") { file ->
+                        "// --- web2apk/custom/scripts/${file.relativeTo(customScriptsDir).path} ---\n" +
+                            file.readText()
+                    }
+                )
+            }
+        }
+    }
+}
+
+android.sourceSets.getByName("main").res.srcDir(generatedCustomResDir)
+android.sourceSets.getByName("main").assets.srcDir(generatedCustomAssetsDir)
+
+tasks.named("preBuild").configure {
+    dependsOn(syncWeb2ApkCustomResources)
+}
+
 android {
     namespace = "com.example.websitetopk"
     compileSdk = 35
@@ -84,6 +174,7 @@ android {
         buildConfigField("boolean", "ENABLE_FILE_UPLOAD", booleanProp("ENABLE_FILE_UPLOAD", true))
         buildConfigField("boolean", "ENABLE_FULLSCREEN_VIDEO", booleanProp("ENABLE_FULLSCREEN_VIDEO", true))
         buildConfigField("boolean", "ENABLE_FULLSCREEN", booleanProp("ENABLE_FULLSCREEN", true))
+        buildConfigField("boolean", "ENABLE_CUSTOM_SCRIPTS", booleanProp("ENABLE_CUSTOM_SCRIPTS", true))
         buildConfigField("boolean", "ENABLE_LOGGING", booleanProp("ENABLE_LOGGING", true))
         buildConfigField("boolean", "PERMISSION_CAMERA", booleanProp("PERMISSION_CAMERA", false))
         buildConfigField("boolean", "PERMISSION_MICROPHONE", booleanProp("PERMISSION_MICROPHONE", false))

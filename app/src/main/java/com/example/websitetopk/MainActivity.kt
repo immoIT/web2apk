@@ -209,6 +209,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 log("Page finished: $url")
                 injectClipboardSupport(view)
+                injectCustomScripts(view)
                 swipeRefresh.isRefreshing = false
             }
 
@@ -479,6 +480,25 @@ class MainActivity : AppCompatActivity() {
                 view.evaluateJavascript(script, null)
             }
         }, 1500)
+    }
+
+    private fun injectCustomScripts(view: WebView?) {
+        if (!BuildConfig.ENABLE_CUSTOM_SCRIPTS || view == null || !isTrustedPage()) return
+
+        try {
+            val script = assets.open("web2apk-custom.js").bufferedReader().use { it.readText() }
+            if (script.isBlank()) return
+
+            log("Injecting custom WebView script (${script.length} characters)")
+            view.evaluateJavascript(
+                "(function(){try{\n$script\n}catch(e){console.error('web2apk custom script failed',e);}})();",
+                null
+            )
+        } catch (_: java.io.FileNotFoundException) {
+            // No custom script was uploaded. This is a valid/default configuration.
+        } catch (t: Throwable) {
+            logError("Custom WebView script injection failed", t)
+        }
     }
 
     private fun handleWebPermissionRequest(request: PermissionRequest) {
