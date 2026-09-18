@@ -10,6 +10,8 @@ Go to:
 
 **GitHub → Repository → Settings → Secrets and variables → Actions → Variables**
 
+The repository variables are optional because the workflow includes defaults.
+
 Create these repository variables:
 
 ### Main
@@ -45,7 +47,7 @@ Create these repository variables:
 - `PERMISSION_VIBRATE`
 - `PERMISSION_NFC`
 
-The workflow validates that these variables exist before building. There is no `config.yml` configuration path.
+Every setting has a project default in the workflow. If a GitHub Actions repository variable with the same name is set, that GitHub variable overrides the project default. There is no `config.yml` configuration path.
 
 ## Build
 
@@ -60,3 +62,35 @@ The generated APK is uploaded as the `website-to-apk` artifact.
 ## Notes
 
 This is a WebView wrapper, not a native conversion of website source code.
+
+### Project defaults
+
+- `WEB_URL` = `https://example.com`
+- `APP_NAME` = `BoltDownloader`
+- `PACKAGE_NAME` = `com.boltdownloader.app`
+- `VERSION_NAME` = `1.0.0`
+- `VERSION_CODE` = `1`
+- `MIN_SDK` = `24`
+- `TARGET_SDK` = `35`
+- `ORIENTATION` = `unspecified`
+- `ENABLE_JAVASCRIPT` = `true`
+- `ENABLE_DOM_STORAGE` = `true`
+- `ENABLE_PULL_TO_REFRESH` = `true`
+- `ALLOW_EXTERNAL_LINKS` = `true`
+- `ENABLE_DOWNLOADS` = `true`
+- `ENABLE_FILE_UPLOAD` = `true`
+- `ENABLE_FULLSCREEN_VIDEO` = `true`
+- `PERMISSION_INTERNET` = `true`
+- `PERMISSION_CAMERA` = `false`
+- `PERMISSION_MICROPHONE` = `false`
+- `PERMISSION_LOCATION` = `false`
+- `PERMISSION_NOTIFICATIONS` = `false`
+- `PERMISSION_STORAGE` = `false`
+- `PERMISSION_CONTACTS` = `false`
+- `PERMISSION_PHONE` = `false`
+- `PERMISSION_CALENDAR` = `false`
+- `PERMISSION_BLUETOOTH` = `false`
+- `PERMISSION_VIBRATE` = `true`
+- `PERMISSION_NFC` = `false`
+
+Replace `WEB_URL` with the actual BoltDownloader website URL, either in GitHub Actions Variables or directly in the workflow default.
