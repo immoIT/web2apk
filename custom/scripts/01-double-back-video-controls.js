@@ -1,514 +1,687 @@
+/* =========================================================
+   PLAYER HISTORY TRAP + TV BACK BUTTON
+   CUSTOM PLAYER.JS OVERRIDE
+   ========================================================= */
+
 (function () {
     'use strict';
 
-    // =========================================================
-    // CONFIG
-    // =========================================================
+    /* =====================================================
+       SETTINGS
+       ===================================================== */
 
-    const HIDE_DELAY = 5000;
-    const SWIPE_DISTANCE = 45;
+    const AUTO_HIDE_MS = 5000;
+    const DOUBLE_BACK_MS = 800;
+    const DUPLICATE_EVENT_MS = 250;
 
-    let hideTimer = null;
-    let touchStartX = 0;
-    let touchStartY = 0;
+    let lastBackTime = 0;
+    let customHideTimer = null;
 
-    // =========================================================
-    // FIND PLAYER
-    // Change these selectors if your Web2APK player uses
-    // different IDs/classes.
-    // =========================================================
 
-    const player =
-        document.querySelector('#playerModal') ||
-        document.querySelector('.player-modal') ||
-        document.querySelector('.video-player') ||
-        document.querySelector('video')?.parentElement;
+    /* =====================================================
+       ELEMENT HELPERS
+       ===================================================== */
 
-    if (!player) {
-        console.warn('[PlayerControls] Player not found');
-        return;
+    function getPlayerElements() {
+
+        return {
+            modal: document.getElementById('playerModal'),
+            controls: document.getElementById('controls'),
+            title: document.getElementById('videoTitle'),
+            centerPlay: document.getElementById('centerPlayBtn'),
+            close: document.getElementById('closePlayerBtn'),
+            wrapper: document.getElementById('wrapper'),
+            video: document.getElementById('video')
+        };
+
     }
 
-    // =========================================================
-    // CONTROL SELECTORS
-    // Add your custom button classes here if needed.
-    // =========================================================
 
-    const CONTROL_SELECTOR = [
-        'button',
-        '[role="button"]',
-        '.player-control',
-        '.video-control',
-        '.control-btn',
-        '.play-btn',
-        '.pause-btn',
-        '.next-btn',
-        '.prev-btn',
-        '.fullscreen-btn'
-    ].join(',');
+    function isPlayerOpen() {
 
-    // =========================================================
-    // GET CONTROLS
-    // =========================================================
+        const modal = document.getElementById('playerModal');
 
-    function getControls() {
-        return [...player.querySelectorAll(CONTROL_SELECTOR)]
-            .filter(el => {
-                const style = getComputedStyle(el);
+        return !!(
+            modal &&
+            modal.classList.contains('show')
+        );
 
-                return (
-                    !el.disabled &&
-                    style.display !== 'none' &&
-                    style.visibility !== 'hidden'
-                );
-            });
     }
 
-    // =========================================================
-    // SHOW CONTROLS
-    // =========================================================
 
-    function showControls() {
+    /* =====================================================
+       CLEAR ALL CONTROL TIMERS
+       ===================================================== */
 
-        player.classList.remove('controls-hidden');
+    function clearControlTimers() {
 
-        // Compatible with existing ui-hidden systems
-        player.querySelectorAll(
-            '.controls, .player-controls, .video-controls'
-        ).forEach(el => {
-            el.classList.remove('ui-hidden');
-        });
+        clearTimeout(customHideTimer);
 
-        clearTimeout(hideTimer);
+        /*
+         * player.js may have its own timer.
+         */
+        try {
 
-        hideTimer = setTimeout(() => {
-            hideControls();
-        }, HIDE_DELAY);
-    }
-
-    // =========================================================
-    // HIDE CONTROLS
-    // =========================================================
-
-    function hideControls() {
-
-        // Don't hide if a text/input element has focus
-        const active = document.activeElement;
-
-        if (
-            active &&
-            player.contains(active) &&
-            (
-                active.tagName === 'INPUT' ||
-                active.tagName === 'TEXTAREA' ||
-                active.tagName === 'SELECT'
-            )
-        ) {
-            showControls();
-            return;
-        }
-
-        player.classList.add('controls-hidden');
-
-        player.querySelectorAll(
-            '.controls, .player-controls, .video-controls'
-        ).forEach(el => {
-            el.classList.add('ui-hidden');
-        });
-    }
-
-    // =========================================================
-    // RESET HIDE TIMER
-    // =========================================================
-
-    function keepControlsAlive() {
-        showControls();
-    }
-
-    // =========================================================
-    // FOCUS FIRST CONTROL
-    // =========================================================
-
-    function focusFirstControl() {
-
-        const controls = getControls();
-
-        if (!controls.length) return;
-
-        controls.forEach(el => {
-            if (!el.hasAttribute('tabindex')) {
-                el.setAttribute('tabindex', '0');
-            }
-        });
-
-        const current = document.activeElement;
-
-        if (!player.contains(current) || !controls.includes(current)) {
-            controls[0].focus();
-        }
-    }
-
-    // =========================================================
-    // GET CURRENT FOCUS INDEX
-    // =========================================================
-
-    function getFocusedIndex(controls) {
-
-        const current = document.activeElement;
-
-        const index = controls.indexOf(current);
-
-        return index >= 0 ? index : 0;
-    }
-
-    // =========================================================
-    // D-PAD NAVIGATION
-    //
-    // Simple row-based navigation:
-    //
-    // LEFT  = previous
-    // RIGHT = next
-    // UP    = previous
-    // DOWN  = next
-    //
-    // This works reliably with Web2APK/WebView controls.
-    // =========================================================
-
-    function navigate(direction) {
-
-        const controls = getControls();
-
-        if (!controls.length) return;
-
-        let index = getFocusedIndex(controls);
-
-        switch (direction) {
-
-            case 'left':
-            case 'up':
-                index--;
-                break;
-
-            case 'right':
-            case 'down':
-                index++;
-                break;
-        }
-
-        if (index < 0) {
-            index = controls.length - 1;
-        }
-
-        if (index >= controls.length) {
-            index = 0;
-        }
-
-        controls[index].focus();
-
-        showControls();
-    }
-
-    // =========================================================
-    // KEYBOARD / ANDROID TV D-PAD
-    // =========================================================
-
-    document.addEventListener('keydown', function (e) {
-
-        // Player must be visible
-        if (!player || !document.body.contains(player)) {
-            return;
-        }
-
-        const style = getComputedStyle(player);
-
-        if (
-            style.display === 'none' ||
-            style.visibility === 'hidden'
-        ) {
-            return;
-        }
-
-        switch (e.key) {
-
-            // -----------------------------------------------
-            // DPAD UP
-            // -----------------------------------------------
-
-            case 'ArrowUp':
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (player.classList.contains('controls-hidden')) {
-                    showControls();
-                    focusFirstControl();
-                } else {
-                    navigate('up');
-                }
-
-                break;
-
-
-            // -----------------------------------------------
-            // DPAD DOWN
-            // -----------------------------------------------
-
-            case 'ArrowDown':
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (player.classList.contains('controls-hidden')) {
-                    showControls();
-                    focusFirstControl();
-                } else {
-                    navigate('down');
-                }
-
-                break;
-
-
-            // -----------------------------------------------
-            // DPAD LEFT
-            // -----------------------------------------------
-
-            case 'ArrowLeft':
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (player.classList.contains('controls-hidden')) {
-                    showControls();
-                    focusFirstControl();
-                } else {
-                    navigate('left');
-                }
-
-                break;
-
-
-            // -----------------------------------------------
-            // DPAD RIGHT
-            // -----------------------------------------------
-
-            case 'ArrowRight':
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (player.classList.contains('controls-hidden')) {
-                    showControls();
-                    focusFirstControl();
-                } else {
-                    navigate('right');
-                }
-
-                break;
-
-
-            // -----------------------------------------------
-            // ENTER / OK
-            // -----------------------------------------------
-
-            case 'Enter':
-            case 'OK':
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (player.classList.contains('controls-hidden')) {
-
-                    showControls();
-                    focusFirstControl();
-
-                } else {
-
-                    const active = document.activeElement;
-
-                    if (
-                        active &&
-                        player.contains(active) &&
-                        (
-                            active.matches('button') ||
-                            active.getAttribute('role') === 'button'
-                        )
-                    ) {
-                        active.click();
-                    }
-
-                    showControls();
-                }
-
-                break;
-
-
-            // -----------------------------------------------
-            // SPACE
-            // -----------------------------------------------
-
-            case ' ':
-                e.preventDefault();
-
-                showControls();
-
-                const focused = document.activeElement;
-
-                if (
-                    focused &&
-                    player.contains(focused) &&
-                    focused.matches('button, [role="button"]')
-                ) {
-                    focused.click();
-                }
-
-                break;
-
-
-            // -----------------------------------------------
-            // BACK / ESCAPE
-            // -----------------------------------------------
-
-            case 'Escape':
-            case 'Backspace':
-
-                e.preventDefault();
-
-                // Let existing player close handler run if present
-                player.dispatchEvent(
-                    new CustomEvent('web2apk-player-back')
-                );
-
-                break;
-        }
-
-    }, true);
-
-    // =========================================================
-    // TOUCH - SWIPE UP
-    // =========================================================
-
-    player.addEventListener('touchstart', function (e) {
-
-        if (!e.touches || e.touches.length !== 1) return;
-
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
-
-    }, { passive: true });
-
-
-    player.addEventListener('touchend', function (e) {
-
-        if (!e.changedTouches || e.changedTouches.length !== 1) {
-            return;
-        }
-
-        const touch = e.changedTouches[0];
-
-        const deltaX = touch.clientX - touchStartX;
-        const deltaY = touch.clientY - touchStartY;
-
-        // Only vertical gestures
-        if (Math.abs(deltaY) <= Math.abs(deltaX)) {
-            return;
-        }
-
-        // SWIPE UP
-        if (deltaY < -SWIPE_DISTANCE) {
-
-            e.preventDefault();
-
-            showControls();
-            focusFirstControl();
-        }
-
-    }, { passive: false });
-
-
-    // =========================================================
-    // TOUCH / CLICK ON CONTROL
-    // =========================================================
-
-    player.addEventListener('pointerdown', function (e) {
-
-        const control = e.target.closest(CONTROL_SELECTOR);
-
-        if (control) {
-            showControls();
-        }
-
-    }, true);
-
-
-    player.addEventListener('click', function (e) {
-
-        const control = e.target.closest(CONTROL_SELECTOR);
-
-        if (control) {
-            showControls();
-        }
-
-    }, true);
-
-
-    // =========================================================
-    // MOUSE MOVE
-    // =========================================================
-
-    player.addEventListener('mousemove', function () {
-        showControls();
-    }, { passive: true });
-
-
-    // =========================================================
-    // DYNAMIC CONTROLS
-    //
-    // If your JS creates buttons AFTER player opens,
-    // automatically make them focusable.
-    // =========================================================
-
-    const observer = new MutationObserver(function () {
-
-        getControls().forEach(control => {
-
-            if (!control.hasAttribute('tabindex')) {
-                control.setAttribute('tabindex', '0');
+            if (
+                typeof controlHideTimer !== 'undefined' &&
+                controlHideTimer
+            ) {
+                clearTimeout(controlHideTimer);
             }
 
-        });
+        } catch (e) {}
 
-    });
-
-    observer.observe(player, {
-        childList: true,
-        subtree: true
-    });
+    }
 
 
-    // =========================================================
-    // OPTIONAL: EXPOSE API
-    // Other custom JS can call:
-    //
-    // window.Web2APKPlayerControls.show()
-    // window.Web2APKPlayerControls.hide()
-    // window.Web2APKPlayerControls.reset()
-    // =========================================================
+    /* =====================================================
+       HIDE PLAYER CONTROLS
+       ===================================================== */
 
-    window.Web2APKPlayerControls = {
+    function hidePlayerControls() {
 
-        show: function () {
-            showControls();
-        },
+        const {
+            controls,
+            title,
+            centerPlay,
+            close,
+            wrapper
+        } = getPlayerElements();
 
-        hide: function () {
-            hideControls();
-        },
 
-        reset: function () {
-            clearTimeout(hideTimer);
-            showControls();
-        },
+        clearControlTimers();
 
-        focus: function () {
-            showControls();
-            focusFirstControl();
+
+        if (controls) {
+            controls.classList.add('ui-hidden');
+        }
+
+        if (title) {
+            title.classList.add('ui-hidden');
+        }
+
+        if (centerPlay) {
+            centerPlay.classList.add('ui-hidden');
+        }
+
+        if (close) {
+            close.classList.add('ui-hidden');
+        }
+
+        if (wrapper) {
+            wrapper.style.cursor = 'none';
+        }
+
+    }
+
+
+    /* =====================================================
+       SHOW CONTROLS
+       OVERRIDES player.js showControls()
+       ===================================================== */
+
+    window.showControls = function (delay) {
+
+        const {
+            controls,
+            title,
+            centerPlay,
+            close,
+            wrapper,
+            video
+        } = getPlayerElements();
+
+
+        if (!controls) {
+            return;
+        }
+
+
+        const hideDelay =
+            typeof delay === 'number'
+                ? delay
+                : AUTO_HIDE_MS;
+
+
+        clearControlTimers();
+
+
+        /*
+         * SHOW
+         */
+
+        controls.classList.remove('ui-hidden');
+
+
+        if (title) {
+            title.classList.remove('ui-hidden');
+        }
+
+
+        if (centerPlay) {
+            centerPlay.classList.remove('ui-hidden');
+        }
+
+
+        if (close) {
+            close.classList.remove('ui-hidden');
+        }
+
+
+        if (wrapper) {
+            wrapper.style.cursor = 'default';
+        }
+
+
+        /*
+         * IMPORTANT:
+         *
+         * Do NOT check isHoveringControls here.
+         *
+         * TV remote / Android TV mouse emulation can leave
+         * that variable true and prevent controls from hiding.
+         */
+
+
+        if (
+            video &&
+            !video.paused &&
+            !video.ended
+        ) {
+
+            customHideTimer = setTimeout(function () {
+
+                if (!isPlayerOpen()) {
+                    return;
+                }
+
+
+                /*
+                 * If a popup menu is open, don't hide.
+                 */
+
+                const popup =
+                    document.querySelector(
+                        '.popup-menu.active'
+                    );
+
+
+                if (popup) {
+
+                    /*
+                     * Check again shortly.
+                     */
+
+                    customHideTimer = setTimeout(
+                        function () {
+
+                            if (
+                                isPlayerOpen() &&
+                                video &&
+                                !video.paused &&
+                                !video.ended
+                            ) {
+                                hidePlayerControls();
+                            }
+
+                        },
+                        1000
+                    );
+
+                    return;
+                }
+
+
+                hidePlayerControls();
+
+            }, hideDelay);
+
         }
 
     };
+
+
+    /* =====================================================
+       HISTORY TRAP
+       ===================================================== */
+
+    function ensureHistoryTrap() {
+
+        const modal =
+            document.getElementById('playerModal');
+
+
+        if (
+            modal &&
+            modal.classList.contains('show') &&
+            location.hash !== '#tv-trap'
+        ) {
+
+            history.pushState(
+                {
+                    tvTrap: true
+                },
+                '',
+                location.href.split('#')[0] +
+                '#tv-trap'
+            );
+
+        }
+
+    }
+
+
+    /* =====================================================
+       PLAYER MODAL OBSERVER
+       ===================================================== */
+
+    const playerModal =
+        document.getElementById('playerModal');
+
+
+    if (playerModal) {
+
+        const observer =
+            new MutationObserver(function () {
+
+                if (
+                    playerModal.classList.contains('show')
+                ) {
+
+                    ensureHistoryTrap();
+
+                }
+
+                else if (
+                    location.hash === '#tv-trap'
+                ) {
+
+                    /*
+                     * Player closed.
+                     */
+
+                    clearControlTimers();
+
+                    history.back();
+
+                }
+
+            });
+
+
+        observer.observe(
+            playerModal,
+            {
+                attributes: true,
+                attributeFilter: ['class']
+            }
+        );
+
+    }
+
+
+    /* =====================================================
+       BACK KEY DETECTION
+       ===================================================== */
+
+    function isBackKey(e) {
+
+        return (
+            e.key === 'Escape' ||
+            e.key === 'Back' ||
+            e.keyCode === 27 ||
+            e.keyCode === 461 ||
+            e.keyCode === 10009 ||
+            e.keyCode === 8
+        );
+
+    }
+
+
+    /* =====================================================
+       BACK BUTTON ACTION
+       ===================================================== */
+
+    function handlePlayerBackAction(e) {
+
+        if (!isPlayerOpen()) {
+            return;
+        }
+
+
+        const now =
+            Date.now();
+
+
+        const timeDiff =
+            now - lastBackTime;
+
+
+        /*
+         * Ignore duplicate Android / TV events.
+         */
+
+        if (
+            timeDiff < DUPLICATE_EVENT_MS
+        ) {
+
+            return;
+
+        }
+
+
+        /*
+         * SECOND BACK
+         * Close player.
+         */
+
+        if (
+            timeDiff <= DOUBLE_BACK_MS
+        ) {
+
+            lastBackTime = now;
+
+            clearControlTimers();
+
+
+            const closeBtn =
+                document.getElementById(
+                    'closePlayerBtn'
+                );
+
+
+            if (closeBtn) {
+
+                closeBtn.click();
+
+            }
+
+            else if (
+                typeof closePlayer === 'function'
+            ) {
+
+                closePlayer();
+
+            }
+
+
+            return;
+
+        }
+
+
+        lastBackTime = now;
+
+
+        const {
+            controls,
+            wrapper,
+            video
+        } = getPlayerElements();
+
+
+        const controlsHidden =
+            controls &&
+            controls.classList.contains(
+                'ui-hidden'
+            );
+
+
+        const isLandscape =
+            wrapper &&
+            wrapper.classList.contains(
+                'player-landscape'
+            );
+
+
+        /* =================================================
+           LANDSCAPE
+           ================================================= */
+
+        if (isLandscape) {
+
+            /*
+             * Use application's rotation handler
+             * if available.
+             */
+
+            if (
+                typeof setRotationState ===
+                'function'
+            ) {
+
+                setRotationState(false);
+
+            }
+
+            else {
+
+                document.dispatchEvent(
+                    new KeyboardEvent(
+                        'keydown',
+                        {
+                            key: 'Escape',
+                            code: 'Escape',
+                            keyCode: 27,
+                            bubbles: true
+                        }
+                    )
+                );
+
+            }
+
+
+            ensureHistoryTrap();
+
+            return;
+
+        }
+
+
+        /* =================================================
+           CONTROLS HIDDEN
+           BACK = SHOW CONTROLS
+           ================================================= */
+
+        if (controlsHidden) {
+
+            window.showControls(
+                AUTO_HIDE_MS
+            );
+
+
+            ensureHistoryTrap();
+
+            return;
+
+        }
+
+
+        /* =================================================
+           CONTROLS VISIBLE
+           FIRST BACK = HIDE
+           ================================================= */
+
+        if (
+            video &&
+            !video.paused &&
+            !video.ended
+        ) {
+
+            hidePlayerControls();
+
+
+            if (
+                typeof showToast ===
+                'function'
+            ) {
+
+                showToast(
+                    'Double-press BACK to exit video',
+                    'warning'
+                );
+
+            }
+
+
+            ensureHistoryTrap();
+
+            return;
+
+        }
+
+
+        /* =================================================
+           PAUSED VIDEO
+           ================================================= */
+
+        ensureHistoryTrap();
+
+    }
+
+
+    /* =====================================================
+       TV / REMOTE BACK KEY HANDLER
+       CAPTURE PHASE
+       ===================================================== */
+
+    window.addEventListener(
+        'keydown',
+        function (e) {
+
+            if (!e.isTrusted) {
+                return;
+            }
+
+
+            if (!isBackKey(e)) {
+                return;
+            }
+
+
+            if (!isPlayerOpen()) {
+                return;
+            }
+
+
+            /*
+             * STOP player.js BACK handler.
+             *
+             * This prevents two different BACK handlers
+             * from running at the same time.
+             */
+
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+
+
+            handlePlayerBackAction(e);
+
+        },
+        true
+    );
+
+
+    /* =====================================================
+       BROWSER / TV HISTORY BACK
+       ===================================================== */
+
+    window.addEventListener(
+        'popstate',
+        function (e) {
+
+            if (!isPlayerOpen()) {
+                return;
+            }
+
+
+            handlePlayerBackAction(e);
+
+        }
+    );
+
+
+    /* =====================================================
+       VIDEO PLAY
+       ===================================================== */
+
+    document.addEventListener(
+        'play',
+        function (e) {
+
+            if (
+                e.target &&
+                e.target.id === 'video'
+            ) {
+
+                clearControlTimers();
+
+            }
+
+        },
+        true
+    );
+
+
+    /* =====================================================
+       VIDEO PAUSE
+       ===================================================== */
+
+    document.addEventListener(
+        'pause',
+        function (e) {
+
+            if (
+                e.target &&
+                e.target.id === 'video'
+            ) {
+
+                clearControlTimers();
+
+            }
+
+        },
+        true
+    );
+
+
+    /* =====================================================
+       VIDEO ENDED
+       ===================================================== */
+
+    document.addEventListener(
+        'ended',
+        function (e) {
+
+            if (
+                e.target &&
+                e.target.id === 'video'
+            ) {
+
+                clearControlTimers();
+
+            }
+
+        },
+        true
+    );
+
+
+    /* =====================================================
+       REMOVE OLD SYNTHETIC MOUSEMOVE PROBLEM
+       ===================================================== */
+
+    /*
+     * DO NOT DO THIS:
+     *
+     * wrapper.dispatchEvent(
+     *     new MouseEvent('mousemove')
+     * );
+     *
+     * It can repeatedly call player.js showControls()
+     * and reset the auto-hide behaviour.
+     */
+
 
 })();
