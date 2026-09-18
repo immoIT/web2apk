@@ -21,6 +21,7 @@
     <application
         android:allowBackup="true"
         android:label="${appName}"
+        android:icon="@drawable/web2apk_icon"
         android:supportsRtl="true"
         android:theme="@style/Theme.WebsiteToAPK"
         android:usesCleartextTraffic="false">

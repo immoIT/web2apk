@@ -13,33 +13,35 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      WEB_URL: ${{ vars.WEB_URL || 'https://example.com' }}
-      APP_NAME: ${{ vars.APP_NAME || 'BoltDownloader' }}
-      PACKAGE_NAME: ${{ vars.PACKAGE_NAME || 'com.boltdownloader.app' }}
-      VERSION_NAME: ${{ vars.VERSION_NAME || '1.0.0' }}
-      VERSION_CODE: ${{ vars.VERSION_CODE || '1' }}
-      MIN_SDK: ${{ vars.MIN_SDK || '24' }}
-      TARGET_SDK: ${{ vars.TARGET_SDK || '35' }}
-      ORIENTATION: ${{ vars.ORIENTATION || 'unspecified' }}
-      ENABLE_JAVASCRIPT: ${{ vars.ENABLE_JAVASCRIPT || 'true' }}
-      ENABLE_DOM_STORAGE: ${{ vars.ENABLE_DOM_STORAGE || 'true' }}
-      ENABLE_PULL_TO_REFRESH: ${{ vars.ENABLE_PULL_TO_REFRESH || 'true' }}
-      ALLOW_EXTERNAL_LINKS: ${{ vars.ALLOW_EXTERNAL_LINKS || 'true' }}
-      ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS || 'true' }}
-      ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD || 'true' }}
-      ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO || 'true' }}
-      ENABLE_LOGGING: ${{ vars.ENABLE_LOGGING || 'true' }}
-      PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA || 'false' }}
-      PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE || 'false' }}
-      PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION || 'false' }}
-      PERMISSION_NOTIFICATIONS: ${{ vars.PERMISSION_NOTIFICATIONS || 'false' }}
-      PERMISSION_STORAGE: ${{ vars.PERMISSION_STORAGE || 'false' }}
-      PERMISSION_CONTACTS: ${{ vars.PERMISSION_CONTACTS || 'false' }}
-      PERMISSION_PHONE: ${{ vars.PERMISSION_PHONE || 'false' }}
-      PERMISSION_CALENDAR: ${{ vars.PERMISSION_CALENDAR || 'false' }}
-      PERMISSION_BLUETOOTH: ${{ vars.PERMISSION_BLUETOOTH || 'false' }}
-      PERMISSION_VIBRATE: ${{ vars.PERMISSION_VIBRATE || 'true' }}
-      PERMISSION_NFC: ${{ vars.PERMISSION_NFC || 'false' }}
+      WEB_URL: ${{ vars.WEB_URL || '' }}
+      APP_NAME: ${{ vars.APP_NAME || '' }}
+      PACKAGE_NAME: ${{ vars.PACKAGE_NAME || '' }}
+      VERSION_NAME: ${{ vars.VERSION_NAME || '' }}
+      VERSION_CODE: ${{ vars.VERSION_CODE || '' }}
+      MIN_SDK: ${{ vars.MIN_SDK || '' }}
+      TARGET_SDK: ${{ vars.TARGET_SDK || '' }}
+      ORIENTATION: ${{ vars.ORIENTATION || '' }}
+      ENABLE_JAVASCRIPT: ${{ vars.ENABLE_JAVASCRIPT || '' }}
+      ENABLE_DOM_STORAGE: ${{ vars.ENABLE_DOM_STORAGE || '' }}
+      ENABLE_PULL_TO_REFRESH: ${{ vars.ENABLE_PULL_TO_REFRESH || '' }}
+      ALLOW_EXTERNAL_LINKS: ${{ vars.ALLOW_EXTERNAL_LINKS || '' }}
+      ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS || '' }}
+      ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD || '' }}
+      ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO || '' }}
+      ENABLE_FULLSCREEN: ${{ vars.ENABLE_FULLSCREEN || '' }}
+      ENABLE_CUSTOM_SCRIPTS: ${{ vars.ENABLE_CUSTOM_SCRIPTS || '' }}
+      ENABLE_LOGGING: ${{ vars.ENABLE_LOGGING || '' }}
+      PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA || '' }}
+      PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE || '' }}
+      PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION || '' }}
+      PERMISSION_NOTIFICATIONS: ${{ vars.PERMISSION_NOTIFICATIONS || '' }}
+      PERMISSION_STORAGE: ${{ vars.PERMISSION_STORAGE || '' }}
+      PERMISSION_CONTACTS: ${{ vars.PERMISSION_CONTACTS || '' }}
+      PERMISSION_PHONE: ${{ vars.PERMISSION_PHONE || '' }}
+      PERMISSION_CALENDAR: ${{ vars.PERMISSION_CALENDAR || '' }}
+      PERMISSION_BLUETOOTH: ${{ vars.PERMISSION_BLUETOOTH || '' }}
+      PERMISSION_VIBRATE: ${{ vars.PERMISSION_VIBRATE || '' }}
+      PERMISSION_NFC: ${{ vars.PERMISSION_NFC || '' }}
       GRADLE_VERSION: '8.10.2'
 
     defaults:
@@ -79,6 +81,36 @@ jobs:
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
+      - name: Load configuration defaults
+        run: |
+          set -Eeuo pipefail
+          {
+            echo '=== Loading config/defaults.properties ==='
+            test -f config/defaults.properties || { echo 'ERROR: config/defaults.properties not found'; exit 1; }
+
+            while IFS='=' read -r key value; do
+              key="$(echo "$key" | xargs)"
+              [[ -z "$key" || "$key" == \#* ]] && continue
+              value="${value%$'\r'}"
+
+              # Only apply the repository default when the GitHub Actions
+              # variable is unset or empty. Non-empty vars remain overrides.
+              if [[ -z "${!key:-}" ]]; then
+                echo "$key=$value" >> "$GITHUB_ENV"
+              fi
+            done < config/defaults.properties
+
+            # Explicit safety defaults for the two optional booleans.
+            if [[ -z "${ALLOW_EXTERNAL_LINKS:-}" ]]; then
+              echo 'ALLOW_EXTERNAL_LINKS=true' >> "$GITHUB_ENV"
+            fi
+            if [[ -z "${ENABLE_CUSTOM_SCRIPTS:-}" ]]; then
+              echo 'ENABLE_CUSTOM_SCRIPTS=true' >> "$GITHUB_ENV"
+            fi
+
+            echo 'Configuration defaults loaded.'
+          } 2>&1 | tee build-logs/02b-config-defaults.log
+
       - name: Print build environment
         run: |
           set -Eeuo pipefail
@@ -108,8 +140,8 @@ jobs:
             [[ "$VERSION_CODE" =~ ^[0-9]+$ ]] && (( VERSION_CODE > 0 )) || { echo "ERROR: VERSION_CODE must be a positive integer: $VERSION_CODE"; exit 1; }
             [[ "$MIN_SDK" =~ ^[0-9]+$ ]] && (( MIN_SDK >= 21 )) || { echo "ERROR: MIN_SDK must be >= 21: $MIN_SDK"; exit 1; }
             [[ "$TARGET_SDK" =~ ^[0-9]+$ ]] && (( TARGET_SDK >= MIN_SDK )) || { echo "ERROR: TARGET_SDK must be >= MIN_SDK: $TARGET_SDK"; exit 1; }
-            for value in ENABLE_JAVASCRIPT ENABLE_DOM_STORAGE ENABLE_PULL_TO_REFRESH ALLOW_EXTERNAL_LINKS ENABLE_DOWNLOADS ENABLE_FILE_UPLOAD ENABLE_FULLSCREEN_VIDEO ENABLE_LOGGING PERMISSION_CAMERA PERMISSION_MICROPHONE PERMISSION_LOCATION PERMISSION_NOTIFICATIONS PERMISSION_STORAGE PERMISSION_CONTACTS PERMISSION_PHONE PERMISSION_CALENDAR PERMISSION_BLUETOOTH PERMISSION_VIBRATE PERMISSION_NFC; do
-              current="${!value}"
+            for value in ENABLE_JAVASCRIPT ENABLE_DOM_STORAGE ENABLE_PULL_TO_REFRESH ALLOW_EXTERNAL_LINKS ENABLE_DOWNLOADS ENABLE_FILE_UPLOAD ENABLE_FULLSCREEN_VIDEO ENABLE_FULLSCREEN ENABLE_CUSTOM_SCRIPTS ENABLE_LOGGING PERMISSION_CAMERA PERMISSION_MICROPHONE PERMISSION_LOCATION PERMISSION_NOTIFICATIONS PERMISSION_STORAGE PERMISSION_CONTACTS PERMISSION_PHONE PERMISSION_CALENDAR PERMISSION_BLUETOOTH PERMISSION_VIBRATE PERMISSION_NFC; do
+              current="${!value:-}"
               case "${current,,}" in
                 true|false|1|0|yes|no|y|n|on|off) ;;
                 *) echo "ERROR: Invalid boolean $value='$current'"; exit 1 ;;
@@ -178,6 +210,8 @@ jobs:
               -PENABLE_DOWNLOADS="$ENABLE_DOWNLOADS" \
               -PENABLE_FILE_UPLOAD="$ENABLE_FILE_UPLOAD" \
               -PENABLE_FULLSCREEN_VIDEO="$ENABLE_FULLSCREEN_VIDEO" \
+              -PENABLE_FULLSCREEN="$ENABLE_FULLSCREEN" \
+              -PENABLE_CUSTOM_SCRIPTS="$ENABLE_CUSTOM_SCRIPTS" \
               -PENABLE_LOGGING="$ENABLE_LOGGING" \
               -PPERMISSION_CAMERA="$PERMISSION_CAMERA" \
               -PPERMISSION_MICROPHONE="$PERMISSION_MICROPHONE" \
@@ -197,9 +231,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           {
-            BUILD_CONFIG='app/build/generated/source/buildConfig/debug/com/example/websitetopk/BuildConfig.java'
-            echo "=== Checking $BUILD_CONFIG ==="
-            test -f "$BUILD_CONFIG" || { echo 'ERROR: BuildConfig.java was not generated'; exit 1; }
+            BUILD_CONFIG="$(find app/build/generated/source/buildConfig/debug -type f -name BuildConfig.java -print -quit 2>/dev/null || true)"
+            echo "=== Checking ${BUILD_CONFIG:-<not found>} ==="
+            test -n "$BUILD_CONFIG" && test -f "$BUILD_CONFIG" || { echo 'ERROR: BuildConfig.java was not generated'; exit 1; }
             grep -nE 'public static final (String|boolean) ' "$BUILD_CONFIG"
             if grep -nE '= (True|False);' "$BUILD_CONFIG"; then
               echo 'ERROR: Invalid Java boolean literal found in generated BuildConfig'
