@@ -1,15 +1,18 @@
-# Website To APK — Optional Variables Edition
+# Website To APK — GitHub Variables
 
 This repository wraps a website in an Android WebView and builds the APK through GitHub Actions.
 
-## Optional variables
+## Configuration
 
-You do NOT have to create any GitHub Actions variables. Built-in defaults are used.
+**All configuration comes from GitHub Actions repository variables.**
 
-If a repository variable exists, it overrides the default.
+Go to:
 
-### Main variables
+**GitHub → Repository → Settings → Secrets and variables → Actions → Variables**
 
+Create these repository variables:
+
+### Main
 - `WEB_URL`
 - `APP_NAME`
 - `PACKAGE_NAME`
@@ -20,7 +23,6 @@ If a repository variable exists, it overrides the default.
 - `ORIENTATION`
 
 ### WebView
-
 - `ENABLE_JAVASCRIPT`
 - `ENABLE_DOM_STORAGE`
 - `ENABLE_PULL_TO_REFRESH`
@@ -30,7 +32,6 @@ If a repository variable exists, it overrides the default.
 - `ENABLE_FULLSCREEN_VIDEO`
 
 ### Android permissions
-
 - `PERMISSION_INTERNET`
 - `PERMISSION_CAMERA`
 - `PERMISSION_MICROPHONE`
@@ -44,32 +45,18 @@ If a repository variable exists, it overrides the default.
 - `PERMISSION_VIBRATE`
 - `PERMISSION_NFC`
 
-All permission variables default to `false`, except Internet which defaults to `true`.
-
-## Configure
-
-You can either:
-
-1. Do nothing and use defaults.
-2. Add GitHub repository variables under Settings → Secrets and variables → Actions → Variables.
-3. Use `config.yml` as a human-readable configuration reference.
-
-The workflow always has fallback values, so missing variables do not break the build.
+The workflow validates that these variables exist before building. There is no `config.yml` configuration path.
 
 ## Build
 
-Push to GitHub. Then open:
+Push to GitHub, then open:
 
-Actions → Build Website APK
+**Actions → Build Website APK**
 
-Download the `website-to-apk` artifact.
+The generated APK is uploaded as the `website-to-apk` artifact.
 
-You can also use **Run workflow** and optionally supply a website URL.
+`-P` in the Gradle command is intentional: it passes each GitHub variable to Gradle as a project property.
 
-## Important
+## Notes
 
 This is a WebView wrapper, not a native conversion of website source code.
-
-Website clicks, JavaScript interactions, forms, SPA navigation, and normal HTTP/HTTPS links work through WebView. Camera, microphone, location and other device features require both Android permission configuration and support from the website.
-
-For Play Store production releases, configure app signing and review the permissions you enable.

@@ -5,20 +5,6 @@ on:
     branches: ["**"]
   pull_request:
   workflow_dispatch:
-    inputs:
-      web_url:
-        description: "Optional website URL override"
-        required: false
-        default: ""
-        type: string
-      build_type:
-        description: "Build type"
-        required: false
-        default: "debug"
-        type: choice
-        options:
-          - debug
-          - release
 
 permissions:
   contents: write
@@ -27,37 +13,59 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Every variable is optional. If missing/blank, the fallback is used.
-      WEB_URL: ${{ github.event.inputs.web_url || vars.WEB_URL || 'https://example.com' }}
-      APP_NAME: ${{ vars.APP_NAME || 'Website To APK' }}
-      PACKAGE_NAME: ${{ vars.PACKAGE_NAME || 'com.example.websitetopk' }}
-      VERSION_NAME: ${{ vars.VERSION_NAME || '1.0.0' }}
-      VERSION_CODE: ${{ vars.VERSION_CODE || '1' }}
-      MIN_SDK: ${{ vars.MIN_SDK || '23' }}
-      TARGET_SDK: ${{ vars.TARGET_SDK || '35' }}
-      ORIENTATION: ${{ vars.ORIENTATION || 'unspecified' }}
-      ENABLE_JAVASCRIPT: ${{ vars.ENABLE_JAVASCRIPT || 'true' }}
-      ENABLE_DOM_STORAGE: ${{ vars.ENABLE_DOM_STORAGE || 'true' }}
-      ENABLE_PULL_TO_REFRESH: ${{ vars.ENABLE_PULL_TO_REFRESH || 'false' }}
-      ALLOW_EXTERNAL_LINKS: ${{ vars.ALLOW_EXTERNAL_LINKS || 'true' }}
-      ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS || 'true' }}
-      ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD || 'true' }}
-      ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO || 'true' }}
-      PERMISSION_INTERNET: ${{ vars.PERMISSION_INTERNET || 'true' }}
-      PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA || 'false' }}
-      PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE || 'false' }}
-      PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION || 'false' }}
-      PERMISSION_NOTIFICATIONS: ${{ vars.PERMISSION_NOTIFICATIONS || 'false' }}
-      PERMISSION_STORAGE: ${{ vars.PERMISSION_STORAGE || 'false' }}
-      PERMISSION_CONTACTS: ${{ vars.PERMISSION_CONTACTS || 'false' }}
-      PERMISSION_PHONE: ${{ vars.PERMISSION_PHONE || 'false' }}
-      PERMISSION_CALENDAR: ${{ vars.PERMISSION_CALENDAR || 'false' }}
-      PERMISSION_BLUETOOTH: ${{ vars.PERMISSION_BLUETOOTH || 'false' }}
-      PERMISSION_VIBRATE: ${{ vars.PERMISSION_VIBRATE || 'false' }}
-      PERMISSION_NFC: ${{ vars.PERMISSION_NFC || 'false' }}
+      # Configuration comes only from GitHub Actions repository variables.
+      WEB_URL: ${{ vars.WEB_URL }}
+      APP_NAME: ${{ vars.APP_NAME }}
+      PACKAGE_NAME: ${{ vars.PACKAGE_NAME }}
+      VERSION_NAME: ${{ vars.VERSION_NAME }}
+      VERSION_CODE: ${{ vars.VERSION_CODE }}
+      MIN_SDK: ${{ vars.MIN_SDK }}
+      TARGET_SDK: ${{ vars.TARGET_SDK }}
+      ORIENTATION: ${{ vars.ORIENTATION }}
+      ENABLE_JAVASCRIPT: ${{ vars.ENABLE_JAVASCRIPT }}
+      ENABLE_DOM_STORAGE: ${{ vars.ENABLE_DOM_STORAGE }}
+      ENABLE_PULL_TO_REFRESH: ${{ vars.ENABLE_PULL_TO_REFRESH }}
+      ALLOW_EXTERNAL_LINKS: ${{ vars.ALLOW_EXTERNAL_LINKS }}
+      ENABLE_DOWNLOADS: ${{ vars.ENABLE_DOWNLOADS }}
+      ENABLE_FILE_UPLOAD: ${{ vars.ENABLE_FILE_UPLOAD }}
+      ENABLE_FULLSCREEN_VIDEO: ${{ vars.ENABLE_FULLSCREEN_VIDEO }}
+      PERMISSION_INTERNET: ${{ vars.PERMISSION_INTERNET }}
+      PERMISSION_CAMERA: ${{ vars.PERMISSION_CAMERA }}
+      PERMISSION_MICROPHONE: ${{ vars.PERMISSION_MICROPHONE }}
+      PERMISSION_LOCATION: ${{ vars.PERMISSION_LOCATION }}
+      PERMISSION_NOTIFICATIONS: ${{ vars.PERMISSION_NOTIFICATIONS }}
+      PERMISSION_STORAGE: ${{ vars.PERMISSION_STORAGE }}
+      PERMISSION_CONTACTS: ${{ vars.PERMISSION_CONTACTS }}
+      PERMISSION_PHONE: ${{ vars.PERMISSION_PHONE }}
+      PERMISSION_CALENDAR: ${{ vars.PERMISSION_CALENDAR }}
+      PERMISSION_BLUETOOTH: ${{ vars.PERMISSION_BLUETOOTH }}
+      PERMISSION_VIBRATE: ${{ vars.PERMISSION_VIBRATE }}
+      PERMISSION_NFC: ${{ vars.PERMISSION_NFC }}
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate GitHub variables
+        shell: bash
+        run: |
+          required_vars=(
+            WEB_URL APP_NAME PACKAGE_NAME VERSION_NAME VERSION_CODE
+            MIN_SDK TARGET_SDK ORIENTATION
+            ENABLE_JAVASCRIPT ENABLE_DOM_STORAGE ENABLE_PULL_TO_REFRESH
+            ALLOW_EXTERNAL_LINKS ENABLE_DOWNLOADS ENABLE_FILE_UPLOAD
+            ENABLE_FULLSCREEN_VIDEO
+            PERMISSION_INTERNET PERMISSION_CAMERA PERMISSION_MICROPHONE
+            PERMISSION_LOCATION PERMISSION_NOTIFICATIONS PERMISSION_STORAGE
+            PERMISSION_CONTACTS PERMISSION_PHONE PERMISSION_CALENDAR
+            PERMISSION_BLUETOOTH PERMISSION_VIBRATE PERMISSION_NFC
+          )
+
+          for name in "${required_vars[@]}"; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::GitHub Actions repository variable '$name' is missing."
+              exit 1
+            fi
+          done
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -68,8 +76,6 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          # The old "tools" SDK package no longer exists.
-          # Install only the packages required by this project.
           packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Set up Gradle
@@ -78,12 +84,40 @@ jobs:
       - name: Generate Gradle wrapper
         run: gradle wrapper --gradle-version 8.10.2
 
-      - name: Build configuration
+      - name: Build APK
         shell: bash
         run: |
-          ./gradlew assembleDebug             -PWEB_URL="$WEB_URL"             -PAPP_NAME="$APP_NAME"             -PPACKAGE_NAME="$PACKAGE_NAME"             -PVERSION_NAME="$VERSION_NAME"             -PVERSION_CODE="$VERSION_CODE"             -PMIN_SDK="$MIN_SDK"             -PTARGET_SDK="$TARGET_SDK"             -PENABLE_JAVASCRIPT="$ENABLE_JAVASCRIPT"             -PENABLE_DOM_STORAGE="$ENABLE_DOM_STORAGE"             -PENABLE_PULL_TO_REFRESH="$ENABLE_PULL_TO_REFRESH"             -PALLOW_EXTERNAL_LINKS="$ALLOW_EXTERNAL_LINKS"             -PENABLE_DOWNLOADS="$ENABLE_DOWNLOADS"             -PENABLE_FILE_UPLOAD="$ENABLE_FILE_UPLOAD"             -PENABLE_FULLSCREEN_VIDEO="$ENABLE_FULLSCREEN_VIDEO"             -PPERMISSION_CAMERA="$PERMISSION_CAMERA"             -PPERMISSION_MICROPHONE="$PERMISSION_MICROPHONE"             -PPERMISSION_LOCATION="$PERMISSION_LOCATION"             -PPERMISSION_NOTIFICATIONS="$PERMISSION_NOTIFICATIONS"             -PPERMISSION_STORAGE="$PERMISSION_STORAGE"             -PPERMISSION_CONTACTS="$PERMISSION_CONTACTS"             -PPERMISSION_PHONE="$PERMISSION_PHONE"             -PPERMISSION_CALENDAR="$PERMISSION_CALENDAR"             -PPERMISSION_BLUETOOTH="$PERMISSION_BLUETOOTH"             -PPERMISSION_VIBRATE="$PERMISSION_VIBRATE"             -PPERMISSION_NFC="$PERMISSION_NFC"
+          ./gradlew assembleDebug \
+            -PWEB_URL="$WEB_URL" \
+            -PAPP_NAME="$APP_NAME" \
+            -PPACKAGE_NAME="$PACKAGE_NAME" \
+            -PVERSION_NAME="$VERSION_NAME" \
+            -PVERSION_CODE="$VERSION_CODE" \
+            -PMIN_SDK="$MIN_SDK" \
+            -PTARGET_SDK="$TARGET_SDK" \
+            -PORIENTATION="$ORIENTATION" \
+            -PENABLE_JAVASCRIPT="$ENABLE_JAVASCRIPT" \
+            -PENABLE_DOM_STORAGE="$ENABLE_DOM_STORAGE" \
+            -PENABLE_PULL_TO_REFRESH="$ENABLE_PULL_TO_REFRESH" \
+            -PALLOW_EXTERNAL_LINKS="$ALLOW_EXTERNAL_LINKS" \
+            -PENABLE_DOWNLOADS="$ENABLE_DOWNLOADS" \
+            -PENABLE_FILE_UPLOAD="$ENABLE_FILE_UPLOAD" \
+            -PENABLE_FULLSCREEN_VIDEO="$ENABLE_FULLSCREEN_VIDEO" \
+            -PPERMISSION_INTERNET="$PERMISSION_INTERNET" \
+            -PPERMISSION_CAMERA="$PERMISSION_CAMERA" \
+            -PPERMISSION_MICROPHONE="$PERMISSION_MICROPHONE" \
+            -PPERMISSION_LOCATION="$PERMISSION_LOCATION" \
+            -PPERMISSION_NOTIFICATIONS="$PERMISSION_NOTIFICATIONS" \
+            -PPERMISSION_STORAGE="$PERMISSION_STORAGE" \
+            -PPERMISSION_CONTACTS="$PERMISSION_CONTACTS" \
+            -PPERMISSION_PHONE="$PERMISSION_PHONE" \
+            -PPERMISSION_CALENDAR="$PERMISSION_CALENDAR" \
+            -PPERMISSION_BLUETOOTH="$PERMISSION_BLUETOOTH" \
+            -PPERMISSION_VIBRATE="$PERMISSION_VIBRATE" \
+            -PPERMISSION_NFC="$PERMISSION_NFC"
 
       - name: Prepare APK
+        shell: bash
         run: |
           mkdir -p dist
           cp app/build/outputs/apk/debug/app-debug.apk "dist/${APP_NAME// /-}-debug.apk"

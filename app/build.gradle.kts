@@ -19,6 +19,8 @@ android {
         versionCode = prop("VERSION_CODE", "1").toInt()
         versionName = prop("VERSION_NAME", "1.0.0")
 
+        manifestPlaceholders["orientation"] = prop("ORIENTATION", "unspecified")
+
     buildConfigField("String", "WEB_URL", "\"${prop("WEB_URL", "https://example.com")}\"")
     buildConfigField("String", "APP_NAME", "\"${prop("APP_NAME", "Website To APK")}\"")
     buildConfigField("boolean", "ENABLE_JAVASCRIPT", prop("ENABLE_JAVASCRIPT", "true"))
