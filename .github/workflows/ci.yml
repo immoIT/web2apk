@@ -15,6 +15,7 @@ jobs:
     env:
       WEB_URL: ${{ vars.WEB_URL || 'https://example.com' }}
       APP_NAME: ${{ vars.APP_NAME || 'BoltDownloader' }}
+      APP_ICON_URL: ${{ vars.APP_ICON_URL || '' }}
       PACKAGE_NAME: ${{ vars.PACKAGE_NAME || 'com.boltdownloader.app' }}
       VERSION_NAME: ${{ vars.VERSION_NAME || '1.0.0' }}
       VERSION_CODE: ${{ vars.VERSION_CODE || '1' }}
@@ -103,6 +104,9 @@ jobs:
           {
             echo '=== Configuration validation ==='
             test -n "$WEB_URL" || { echo 'ERROR: WEB_URL is empty'; exit 1; }
+            if [[ -n "$APP_ICON_URL" ]]; then
+              [[ "$APP_ICON_URL" =~ ^https?:// ]] || { echo "ERROR: APP_ICON_URL must start with http:// or https://: $APP_ICON_URL"; exit 1; }
+            fi
             [[ "$WEB_URL" =~ ^https?:// ]] || { echo "ERROR: WEB_URL must start with http:// or https://: $WEB_URL"; exit 1; }
             [[ "$PACKAGE_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$ ]] || { echo "ERROR: Invalid PACKAGE_NAME: $PACKAGE_NAME"; exit 1; }
             [[ "$VERSION_CODE" =~ ^[0-9]+$ ]] && (( VERSION_CODE > 0 )) || { echo "ERROR: VERSION_CODE must be a positive integer: $VERSION_CODE"; exit 1; }
@@ -118,11 +122,32 @@ jobs:
             echo 'Configuration is valid.'
             echo "WEB_URL=$WEB_URL"
             echo "APP_NAME=$APP_NAME"
+            echo "APP_ICON_URL=${APP_ICON_URL:+[configured]}"
             echo "PACKAGE_NAME=$PACKAGE_NAME"
             echo "VERSION_NAME=$VERSION_NAME"
             echo "VERSION_CODE=$VERSION_CODE"
             echo "MIN_SDK=$MIN_SDK TARGET_SDK=$TARGET_SDK ORIENTATION=$ORIENTATION"
           } 2>&1 | tee build-logs/03-config-validation.log
+
+      - name: Prepare app icon
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$APP_ICON_URL" ]]; then
+            echo 'APP_ICON_URL not set; using bundled default app icon.'
+            exit 0
+          fi
+
+          tmp_icon="$RUNNER_TEMP/app-icon-source"
+          mkdir -p "$(dirname "app/src/main/res/drawable/app_icon.png")"
+          echo 'Downloading app icon from APP_ICON_URL...'
+          curl --fail --location --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+            -A 'WebsiteToAPK/1.0' "$APP_ICON_URL" -o "$tmp_icon"
+
+          echo 'Converting app icon to 512x512 PNG...'
+          magick "$tmp_icon" -auto-orient -thumbnail '512x512^' -gravity center -extent 512x512 PNG32:"app/src/main/res/drawable/app_icon.png"
+          test -s app/src/main/res/drawable/app_icon.png
+          file app/src/main/res/drawable/app_icon.png
+          echo 'App icon prepared successfully.'
 
       - name: Validate Gradle configuration
         run: |
@@ -165,6 +190,7 @@ jobs:
             gradle :app:assembleDebug --no-daemon --max-workers=2 --stacktrace --info --warning-mode all \
               -PWEB_URL="$WEB_URL" \
               -PAPP_NAME="$APP_NAME" \
+              -PAPP_ICON_URL="$APP_ICON_URL" \
               -PPACKAGE_NAME="$PACKAGE_NAME" \
               -PVERSION_NAME="$VERSION_NAME" \
               -PVERSION_CODE="$VERSION_CODE" \
