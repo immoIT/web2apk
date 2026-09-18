@@ -42,6 +42,7 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "WebsiteToAPK"
         private const val CONFIGURED_PERMISSION_REQUEST_CODE = 9001
         private const val WEB_PERMISSION_REQUEST_CODE = 9002
+        private const val DOUBLE_BACK_WINDOW_MS = 600L
     }
 
     private lateinit var webView: WebView
@@ -49,6 +50,7 @@ class MainActivity : AppCompatActivity() {
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var permissionCallback: PermissionRequest? = null
+    private var lastBackPressAt = 0L
     private var pendingWebResources: Array<String> = emptyArray()
     private val clipboardManager by lazy {
         getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
@@ -125,6 +127,16 @@ class MainActivity : AppCompatActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                val now = android.os.SystemClock.elapsedRealtime()
+                val isDoubleBack = now - lastBackPressAt <= DOUBLE_BACK_WINDOW_MS
+                lastBackPressAt = now
+
+                if (isDoubleBack) {
+                    log("Double back detected: showing video controls")
+                    showVideoControlsFromDoubleBack()
+                    return
+                }
+
                 if (webView.canGoBack()) {
                     log("Back: navigating WebView history")
                     webView.goBack()
@@ -134,6 +146,15 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    private fun showVideoControlsFromDoubleBack() {
+        if (isFinishing || isDestroyed || !isTrustedPage()) return
+
+        webView.evaluateJavascript(
+            "(function(){window.dispatchEvent(new Event('web2apk-double-back'));})()",
+            null
+        )
     }
 
     private fun applyFullscreenMode() {
