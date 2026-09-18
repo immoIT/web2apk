@@ -138,3 +138,10 @@ so booleans such as `ALLOW_EXTERNAL_LINKS` never become an empty string.
 ### Gradle Kotlin DSL compatibility
 
 The configuration loader uses an explicit `java.util.Properties` import and explicit Kotlin lambda parameters so the Gradle Kotlin DSL compiles correctly.
+
+
+## Android TV compatibility
+
+This version declares Android TV/Leanback support, does not require a touchscreen, disables touch-only pull-to-refresh on TV devices, gives the WebView initial D-pad focus, and adds spatial D-pad/OK navigation for common links, buttons, and form controls.
+
+Build with Android Studio/Gradle and install the resulting APK on the TV.
