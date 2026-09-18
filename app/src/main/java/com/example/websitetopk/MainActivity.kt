@@ -11,6 +11,7 @@ import android.webkit.JavascriptInterface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -123,14 +124,37 @@ class MainActivity : AppCompatActivity() {
             webView.restoreState(savedInstanceState)
         }
 
+        // Android TV remotes commonly send BACK as a key event. Treat the first
+        // press as a request to close the active WebView state (modal/dialog,
+        // fullscreen/popup, etc.) or navigate one WebView history step. A second
+        // press within one second exits the Activity. This avoids accidentally
+        // exiting while a popup is still open.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            private var lastBackPressAt = 0L
+
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                    log("Back: navigating WebView history")
-                    webView.goBack()
-                } else {
-                    log("Back: finishing activity")
+                val now = SystemClock.elapsedRealtime()
+                if (lastBackPressAt != 0L && now - lastBackPressAt <= 1000L) {
+                    lastBackPressAt = 0L
+                    log("Back: double press -> finish activity")
                     finish()
+                    return
+                }
+
+                lastBackPressAt = now
+                closeCurrentWebState { closed ->
+                    if (closed) {
+                        log("Back: closed active WebView popup/state")
+                        webView.requestFocus(View.FOCUS_DOWN)
+                        return@closeCurrentWebState
+                    }
+
+                    if (webView.canGoBack()) {
+                        log("Back: navigating WebView history")
+                        webView.goBack()
+                    } else {
+                        log("Back: waiting for second press to exit")
+                    }
                 }
             }
         })
@@ -499,7 +523,8 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Adds spatial D-pad navigation for pages that were designed primarily for touch.
-     * Normal text-entry arrow behavior is preserved inside editable controls.
+     * Navigation is modal-aware so background controls cannot steal focus while a
+     * popup/dialog is visible. Normal text-entry arrow behavior is preserved.
      */
     private fun injectTvNavigation(view: WebView?) {
         if (!isTvDevice || view == null || !isTrustedPage()) return
@@ -515,26 +540,170 @@ class MainActivity : AppCompatActivity() {
                     return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
                 }
 
-                function focusables() {
-                    var nodes = Array.prototype.slice.call(document.querySelectorAll(
-                        'a[href],button,input,textarea,select,[tabindex]:not([tabindex="-1"]),[role="button"]'
-                    ));
-                    return nodes.filter(function(el) {
-                        var r = el.getBoundingClientRect();
-                        var st = window.getComputedStyle(el);
-                        return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' &&
-                               st.display !== 'none' && !el.disabled &&
-                               el.getAttribute('aria-disabled') !== 'true';
+                function visible(el) {
+                    if (!el || el.nodeType !== 1) return false;
+                    var r = el.getBoundingClientRect();
+                    if (r.width <= 0 || r.height <= 0) return false;
+                    var st = window.getComputedStyle(el);
+                    if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') return false;
+                    if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+                    return true;
+                }
+
+                function focusableSelector() {
+                    return 'a[href],button,input,textarea,select,summary,[tabindex]:not([tabindex="-1"]),[role="button"],[role="link"],[onclick]';
+                }
+
+                function modalCandidates() {
+                    var selectors = [
+                        'dialog[open]',
+                        '[role="dialog"]',
+                        '[aria-modal="true"]',
+                        '[data-modal="true"]',
+                        '[data-popup="true"]',
+                        '[data-dialog="true"]',
+                        '.modal', '.popup', '.dialog',
+                        '[class*="modal"]', '[class*="popup"]', '[class*="dialog"]'
+                    ];
+                    var seen = [];
+                    selectors.forEach(function(selector) {
+                        try {
+                            Array.prototype.slice.call(document.querySelectorAll(selector)).forEach(function(el) {
+                                if (seen.indexOf(el) < 0 && visible(el)) seen.push(el);
+                            });
+                        } catch (_) {}
+                    });
+                    return seen;
+                }
+
+                function likelyModal(el) {
+                    if (!visible(el)) return false;
+                    if (el.matches && (el.matches('dialog[open],[role="dialog"],[aria-modal="true"],[data-modal="true"],[data-popup="true"],[data-dialog="true"]'))) return true;
+
+                    var st = window.getComputedStyle(el);
+                    var r = el.getBoundingClientRect();
+                    var position = st.position;
+                    var z = parseInt(st.zIndex, 10);
+                    var className = String(el.className || '').toLowerCase();
+                    var id = String(el.id || '').toLowerCase();
+                    var named = /(^|[-_ ])(modal|popup|dialog|overlay)([-_ ]|$)/.test(className + ' ' + id) ||
+                                className.indexOf('modal') >= 0 || className.indexOf('popup') >= 0 || className.indexOf('dialog') >= 0;
+
+                    // Generic fixed overlays are accepted only when they look like
+                    // a real dialog layer (large, above the page, and containing a
+                    // button/control). This avoids treating ordinary fixed headers
+                    // or menus as a modal.
+                    if (named && (position === 'fixed' || position === 'absolute')) return true;
+                    if ((position === 'fixed' || position === 'absolute') && z >= 10 &&
+                        r.width >= window.innerWidth * 0.20 && r.height >= window.innerHeight * 0.15) {
+                        try {
+                            if (el.querySelector(focusableSelector())) return true;
+                        } catch (_) {}
+                    }
+                    return false;
+                }
+
+                function activeModal() {
+                    var current = document.activeElement;
+                    if (current) {
+                        var ancestor = current.closest && current.closest(
+                            'dialog[open],[role="dialog"],[aria-modal="true"],[data-modal="true"],[data-popup="true"],[data-dialog="true"],.modal,.popup,.dialog,[class*="modal"],[class*="popup"],[class*="dialog"]'
+                        );
+                        if (ancestor && likelyModal(ancestor)) return ancestor;
+                    }
+
+                    var candidates = modalCandidates().filter(likelyModal);
+                    if (!candidates.length) return null;
+
+                    // Prefer the highest visible layer. If z-index ties, prefer the
+                    // last DOM element because dialogs are normally appended last.
+                    candidates.sort(function(a, b) {
+                        var za = parseInt(window.getComputedStyle(a).zIndex, 10);
+                        var zb = parseInt(window.getComputedStyle(b).zIndex, 10);
+                        za = isNaN(za) ? 0 : za;
+                        zb = isNaN(zb) ? 0 : zb;
+                        return za - zb;
+                    });
+                    return candidates[candidates.length - 1];
+                }
+
+                function focusables(root) {
+                    root = root || document;
+                    var nodes = [];
+                    try {
+                        nodes = Array.prototype.slice.call(root.querySelectorAll(focusableSelector()));
+                    } catch (_) {}
+                    return nodes.filter(visible).filter(function(el, index, arr) {
+                        return arr.indexOf(el) === index;
                     });
                 }
 
-                function move(direction) {
-                    var current = document.activeElement;
-                    var list = focusables();
-                    if (!list.length) return false;
-                    if (!current || current === document.body || list.indexOf(current) < 0) {
-                        list[0].focus({preventScroll:false});
+                function modalFocusables(modal) {
+                    var list = focusables(modal);
+                    // If the modal itself is focusable and has no child controls,
+                    // keep it navigable rather than falling back to the page.
+                    if (!list.length && visible(modal) && modal.tabIndex >= 0) list = [modal];
+                    return list;
+                }
+
+                function rememberFocus() {
+                    var el = document.activeElement;
+                    if (el && el !== document.body && !activeModal()) {
+                        window.__androidTvLastPageFocus = el;
+                    }
+                }
+
+                function restorePageFocus() {
+                    var previous = window.__androidTvLastPageFocus;
+                    if (previous && document.contains(previous) && visible(previous)) {
+                        try { previous.focus({preventScroll:false}); return true; } catch (_) {}
+                    }
+                    var list = focusables(document);
+                    if (list.length) {
+                        try { list[0].focus({preventScroll:false}); return true; } catch (_) {}
+                    }
+                    return false;
+                }
+
+                function focusInitialModal(modal) {
+                    if (!modal) return false;
+                    var list = modalFocusables(modal);
+                    if (!list.length) {
+                        try { modal.setAttribute('tabindex', '-1'); modal.focus({preventScroll:false}); return true; } catch (_) {}
+                    }
+
+                    // Do not force the remote onto the Close button when the popup
+                    // contains real actions. Start on the first actionable control;
+                    // Close remains part of the same modal focus graph. If Close is
+                    // the only control, it is naturally selected.
+                    var nonDismiss = list.find(function(el) {
+                        var text = [
+                            el.innerText || '',
+                            el.getAttribute('aria-label') || '',
+                            el.getAttribute('title') || '',
+                            el.getAttribute('data-action') || ''
+                        ].join(' ').toLowerCase();
+                        return !/(^|\b)(close|cancel|dismiss)\b/.test(text);
+                    });
+                    var target = nonDismiss || list[0];
+                    try {
+                        target.focus({preventScroll:false});
+                        target.scrollIntoView({block:'nearest', inline:'nearest'});
+                        window.__androidTvLastModal = modal;
                         return true;
+                    } catch (_) {}
+                    return false;
+                }
+
+                function move(direction) {
+                    var modal = activeModal();
+                    var list = modal ? modalFocusables(modal) : focusables(document);
+                    if (!list.length) return false;
+
+                    var current = document.activeElement;
+                    if (!current || current === document.body || list.indexOf(current) < 0) {
+                        if (modal) return focusInitialModal(modal);
+                        try { list[0].focus({preventScroll:false}); return true; } catch (_) { return false; }
                     }
 
                     var a = current.getBoundingClientRect();
@@ -556,20 +725,130 @@ class MainActivity : AppCompatActivity() {
                         else if (direction === 'up') { if (dy >= -2) return; primary = -dy; secondary = Math.abs(dx); }
                         else { if (dy <= 2) return; primary = dy; secondary = Math.abs(dx); }
 
-                        // Prefer elements in the direction of travel, then those aligned with it.
                         var score = primary * primary + secondary * secondary * 1.8;
                         if (score < bestScore) { bestScore = score; best = el; }
                     });
 
                     if (!best) return false;
-                    best.focus({preventScroll:false});
-                    try { best.scrollIntoView({block:'nearest', inline:'nearest'}); } catch (_) {}
-                    return true;
+                    try {
+                        best.focus({preventScroll:false});
+                        best.scrollIntoView({block:'nearest', inline:'nearest'});
+                        return true;
+                    } catch (_) {}
+                    return false;
                 }
+
+                function clickFocused(el) {
+                    if (!el || el === document.body) return false;
+                    var tag = (el.tagName || '').toLowerCase();
+                    if (tag === 'a' || tag === 'button' || tag === 'summary' ||
+                        el.getAttribute('role') === 'button' || el.getAttribute('role') === 'link' ||
+                        el.hasAttribute('onclick')) {
+                        try { el.click(); return true; } catch (_) {}
+                    }
+                    return false;
+                }
+
+                // Called by the Android Activity for BACK. Returns true when a
+                // visible WebView state was consumed/closed, false otherwise.
+                window.__androidCloseCurrentWebState = function() {
+                    try {
+                        var modal = activeModal();
+                        if (!modal) {
+                            // Exit browser/fullscreen media state before touching WebView
+                            // history. This is common for TV video players.
+                            if (document.fullscreenElement) {
+                                try {
+                                    if (document.exitFullscreen) document.exitFullscreen();
+                                    return true;
+                                } catch (_) {}
+                            }
+                            var fullscreenVideo = document.querySelector('video');
+                            if (fullscreenVideo && (fullscreenVideo.webkitDisplayingFullscreen || fullscreenVideo.webkitPresentationMode === 'fullscreen')) {
+                                try {
+                                    if (typeof fullscreenVideo.webkitExitFullscreen === 'function') fullscreenVideo.webkitExitFullscreen();
+                                    else if (typeof fullscreenVideo.webkitSetPresentationMode === 'function') fullscreenVideo.webkitSetPresentationMode('inline');
+                                    return true;
+                                } catch (_) {}
+                            }
+                            // Fullscreen media and browser-style overlays often expose
+                            // a close/exit button without a dialog role. Use the focused
+                            // element's close semantics before considering page history.
+                            var focused = document.activeElement;
+                            if (focused && visible(focused)) {
+                                var text = [
+                                    focused.innerText || '',
+                                    focused.getAttribute('aria-label') || '',
+                                    focused.getAttribute('title') || '',
+                                    focused.getAttribute('data-action') || ''
+                                ].join(' ').toLowerCase();
+                                if (/\b(close|dismiss|cancel|exit fullscreen|exit)\b/.test(text) && clickFocused(focused)) return true;
+                            }
+                            return false;
+                        }
+
+                        var dialog = modal;
+                        if (typeof dialog.close === 'function' && dialog.open) {
+                            dialog.close();
+                            return true;
+                        }
+
+                        var controls = modalFocusables(modal);
+                        var closeControl = controls.find(function(el) {
+                            var text = [
+                                el.innerText || '',
+                                el.getAttribute('aria-label') || '',
+                                el.getAttribute('title') || '',
+                                el.getAttribute('data-action') || '',
+                                el.getAttribute('data-testid') || ''
+                            ].join(' ').toLowerCase().trim();
+                            return /(^|\b)(close|cancel|dismiss|done|ok|×|✕|✖)(\b|$)/.test(text);
+                        });
+
+                        if (!closeControl) {
+                            closeControl = controls.find(function(el) {
+                                var label = [el.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('title') || ''].join(' ').toLowerCase();
+                                return /\b(close|cancel|dismiss)\b/.test(label);
+                            });
+                        }
+
+                        if (closeControl && clickFocused(closeControl)) return true;
+
+                        // Last resort for a conventional modal with a single actionable
+                        // control: activate it. This handles icon-only close buttons whose
+                        // accessible label is missing.
+                        if (controls.length === 1 && clickFocused(controls[0])) return true;
+
+                        return false;
+                    } catch (e) {
+                        console.error('Android TV close-state handling failed', e);
+                        return false;
+                    }
+                };
+
+                document.addEventListener('focusin', function() {
+                    var modal = activeModal();
+                    if (modal) {
+                        if (window.__androidTvLastModal !== modal) focusInitialModal(modal);
+                        window.__androidTvLastModal = modal;
+                    } else {
+                        rememberFocus();
+                        window.__androidTvLastModal = null;
+                    }
+                }, true);
 
                 document.addEventListener('keydown', function(e) {
                     var key = e.key;
+                    var modal = activeModal();
                     var el = document.activeElement;
+
+                    if (modal && (!el || !modal.contains(el))) {
+                        if (focusInitialModal(modal)) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                        }
+                        return;
+                    }
 
                     if (editable(el) && (key === 'ArrowLeft' || key === 'ArrowRight')) return;
                     if (editable(el) && (key === 'ArrowUp' || key === 'ArrowDown') &&
@@ -580,21 +859,39 @@ class MainActivity : AppCompatActivity() {
                             e.preventDefault();
                             e.stopPropagation();
                         }
-                    } else if (key === 'Enter' && el && el !== document.body) {
-                        var tag = (el.tagName || '').toLowerCase();
-                        if (tag === 'a' || tag === 'button' || el.getAttribute('role') === 'button') {
+                    } else if (key === 'Enter' || key === 'NumpadEnter') {
+                        if (clickFocused(el)) {
                             e.preventDefault();
                             e.stopPropagation();
-                            el.click();
                         }
                     }
                 }, true);
+
+                // Detect dynamically created SPA popups/dialogs and put focus inside
+                // them without stealing focus from ordinary page updates.
+                var observer = new MutationObserver(function() {
+                    var modal = activeModal();
+                    if (modal && window.__androidTvLastModal !== modal) {
+                        focusInitialModal(modal);
+                        window.__androidTvLastModal = modal;
+                    } else if (!modal && window.__androidTvLastModal) {
+                        window.__androidTvLastModal = null;
+                        restorePageFocus();
+                    }
+                });
+                try { observer.observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['class','style','hidden','open','aria-hidden','aria-modal']}); } catch (_) {}
 
                 // Keep a visible focus ring even when the website has weak TV styling.
                 var style = document.createElement('style');
                 style.id = '__android_tv_focus_style';
                 style.textContent = '*:focus{outline:3px solid #ffffff !important;outline-offset:2px;}';
                 (document.head || document.documentElement).appendChild(style);
+
+                // Give a modal a chance to settle after framework rendering.
+                setTimeout(function() {
+                    var modal = activeModal();
+                    if (modal) focusInitialModal(modal);
+                }, 150);
             })();
         """.trimIndent()
 
@@ -602,6 +899,30 @@ class MainActivity : AppCompatActivity() {
         view.postDelayed({
             if (!isFinishing && !isDestroyed && isTrustedPage()) view.evaluateJavascript(script, null)
         }, 1200)
+    }
+
+    private fun closeCurrentWebState(onResult: (Boolean) -> Unit) {
+        if (!isTrustedPage()) {
+            onResult(false)
+            return
+        }
+
+        val script = """
+            (function() {
+                try {
+                    if (typeof window.__androidCloseCurrentWebState === 'function') {
+                        return window.__androidCloseCurrentWebState() ? 'true' : 'false';
+                    }
+                } catch (e) {
+                    console.error('Android close-state bridge failed', e);
+                }
+                return 'false';
+            })();
+        """.trimIndent()
+
+        webView.evaluateJavascript(script) { result ->
+            onResult(result == "true" || result == "\"true\"")
+        }
     }
 
     private fun injectCustomScripts(view: WebView?) {
