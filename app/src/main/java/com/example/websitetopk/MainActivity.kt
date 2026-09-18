@@ -26,6 +26,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivity : AppCompatActivity() {
@@ -76,7 +79,10 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        log("onCreate: package=${packageName}, sdk=${Build.VERSION.SDK_INT}, startUrl=$startUrl")
+
+        applyFullscreenMode()
+        configureClipboardSupport()
+        log("onCreate: package=${packageName}, sdk=${Build.VERSION.SDK_INT}, fullscreen=${BuildConfig.ENABLE_FULLSCREEN}, clipboard=${BuildConfig.ENABLE_CLIPBOARD}, startUrl=$startUrl")
 
         setContentView(R.layout.activity_main)
         webView = findViewById(R.id.webView)
@@ -111,6 +117,46 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    private fun configureClipboardSupport() {
+        if (!BuildConfig.ENABLE_CLIPBOARD) return
+
+        // Explicitly enable WebView text selection/context actions and bridge
+        // Android's clipboard service for reliable copy/paste behavior.
+        webView.setOnLongClickListener { false }
+        webView.isLongClickable = true
+        webView.isHapticFeedbackEnabled = true
+
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        webView.setOnCreateContextMenuListener { menu, _ ->
+            if (clipboard.hasPrimaryClip()) {
+                menu.add("Paste").setOnMenuItemClickListener {
+                    val clip = clipboard.primaryClip
+                    val text = clip?.getItemAt(0)?.coerceToText(this)?.toString()
+                    if (!text.isNullOrEmpty()) {
+                        webView.evaluateJavascript(
+                            "document.execCommand('insertText', false, ${org.json.JSONObject.quote(text)})",
+                            null
+                        )
+                    }
+                    true
+                }
+            }
+        }
+    }
+
+    private fun applyFullscreenMode() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+
+        if (BuildConfig.ENABLE_FULLSCREEN) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller.hide(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            controller.show(WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.navigationBars())
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
