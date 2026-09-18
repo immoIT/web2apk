@@ -77,6 +77,11 @@ val customScriptsDir = customDir.resolve("scripts")
 val generatedCustomResDir = layout.buildDirectory.dir("generated/web2apk/res")
 val generatedCustomAssetsDir = layout.buildDirectory.dir("generated/web2apk/assets")
 
+// Optional comma-separated JS file list. Paths are relative to `custom/`.
+// Example: CUSTOM_JS_FILES=app.js,foo/bar.js,lib/generated.js
+// If empty, every *.js under custom/scripts/ is included for backward compatibility.
+val customJsFilesValue = prop("CUSTOM_JS_FILES", "")
+
 val syncWeb2ApkCustomResources = tasks.register("syncWeb2ApkCustomResources") {
     outputs.dirs(generatedCustomResDir, generatedCustomAssetsDir)
 
@@ -122,21 +127,54 @@ val syncWeb2ApkCustomResources = tasks.register("syncWeb2ApkCustomResources") {
             """.trimIndent())
         }
 
-        // Optional WebView JavaScript files. Every *.js file is combined into
-        // one asset and injected after the page finishes loading.
-        if (customScriptsDir.isDirectory) {
-            val scripts = customScriptsDir.walkTopDown()
+        // Custom WebView JavaScript files.
+        // CUSTOM_JS_FILES may explicitly name one or more JS files relative to
+        // custom/, e.g. CUSTOM_JS_FILES=01.js,generated/app.js.
+        // If CUSTOM_JS_FILES is empty, every *.js under custom/scripts/ is used.
+        val requestedJsFiles = customJsFilesValue
+            .split(',', '\n', '\r')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+        val scripts = if (requestedJsFiles.isNotEmpty()) {
+            requestedJsFiles.map { relativePath ->
+                val normalized = relativePath.replace('\\', '/').removePrefix("./")
+                require(!normalized.split('/').any { it == ".." }) {
+                    "CUSTOM_JS_FILES contains a path outside custom/: '$relativePath'"
+                }
+                val file = customDir.resolve(normalized).canonicalFile
+                require(file.toPath().startsWith(customDir.canonicalFile.toPath())) {
+                    "CUSTOM_JS_FILES contains a path outside custom/: '$relativePath'"
+                }
+                require(file.isFile) {
+                    "CUSTOM_JS_FILES file not found: custom/$normalized"
+                }
+                require(file.extension.equals("js", ignoreCase = true)) {
+                    "CUSTOM_JS_FILES entry must be a .js file: '$relativePath'"
+                }
+                file
+            }
+        } else if (customScriptsDir.isDirectory) {
+            customScriptsDir.walkTopDown()
                 .filter { it.isFile && it.extension.equals("js", ignoreCase = true) }
                 .sortedBy { it.relativeTo(customScriptsDir).path }
                 .toList()
+        } else {
+            emptyList()
+        }
 
-            if (scripts.isNotEmpty()) {
-                generatedAssets.resolve("web2apk-custom.js").writeText(
-                    scripts.joinToString("\n\n") { file ->
-                        "// --- web2apk/custom/scripts/${file.relativeTo(customScriptsDir).path} ---\n" +
-                            file.readText()
-                    }
-                )
+        if (scripts.isNotEmpty()) {
+            val manifest = generatedAssets.resolve("web2apk-custom-files.txt")
+            val outputDir = generatedAssets.resolve("custom-js").apply { mkdirs() }
+
+            scripts.forEachIndexed { index, file ->
+                val outputName = "${index.toString().padStart(3, '0')}-${file.name}"
+                project.copy {
+                    from(file)
+                    into(outputDir)
+                    rename { outputName }
+                }
+                manifest.appendText("$outputName\\n")
             }
         }
     }
@@ -175,6 +213,7 @@ android {
         buildConfigField("boolean", "ENABLE_FULLSCREEN_VIDEO", booleanProp("ENABLE_FULLSCREEN_VIDEO", true))
         buildConfigField("boolean", "ENABLE_FULLSCREEN", booleanProp("ENABLE_FULLSCREEN", true))
         buildConfigField("boolean", "ENABLE_CUSTOM_SCRIPTS", booleanProp("ENABLE_CUSTOM_SCRIPTS", true))
+        buildConfigField("String", "CUSTOM_JS_FILES", javaStringLiteral(customJsFilesValue))
         buildConfigField("boolean", "ENABLE_LOGGING", booleanProp("ENABLE_LOGGING", true))
         buildConfigField("boolean", "PERMISSION_CAMERA", booleanProp("PERMISSION_CAMERA", false))
         buildConfigField("boolean", "PERMISSION_MICROPHONE", booleanProp("PERMISSION_MICROPHONE", false))
@@ -195,11 +234,22 @@ android {
 
     buildTypes {
         release {
+            // A signed test-release artifact is useful for sideloading on TV.
+            // It uses the standard debug key only when no production signing
+            // configuration is supplied; replace this with your own keystore for
+            // Play Store/production distribution.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+    }
+
+    packaging {
+        resources {
+            excludes += setOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
         }
     }
 

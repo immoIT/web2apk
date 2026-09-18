@@ -9,6 +9,8 @@ All manual customization lives under `web2apk/custom/`:
 ```text
 custom/
 ├── icon.png                 # upload your own app icon (optional)
+├── generated-a.js           # optional JS file
+├── generated-b.js           # optional JS file
 └── scripts/
     ├── 01-startup.js
     └── 02-custom-ui.js
@@ -27,7 +29,23 @@ The first supported icon found is used automatically. If no icon is present, a b
 
 ### Custom WebView scripts
 
-Put any `.js` files in `custom/scripts/`. The build combines them in filename order and packages them as `web2apk-custom.js`. The app injects that script after the configured website finishes loading.
+You can deploy one or multiple generated `.js` files into the APK.
+
+Use the GitHub Actions variable:
+
+```text
+CUSTOM_JS_FILES=generated-a.js,generated-b.js
+```
+
+The paths are relative to `custom/`, so this also works:
+
+```text
+CUSTOM_JS_FILES=generated/app.js,generated/ui.js,scripts/extra.js
+```
+
+Each selected file is copied into the APK under `assets/custom-js/` and injected after the configured website finishes loading, in the exact order listed in `CUSTOM_JS_FILES`.
+
+If `CUSTOM_JS_FILES` is empty, the backward-compatible behavior is used: every `.js` file under `custom/scripts/` is included in filename order.
 
 Set:
 
@@ -91,6 +109,7 @@ Supported variables include:
 - `ENABLE_FULLSCREEN_VIDEO`
 - `ENABLE_FULLSCREEN`
 - `ENABLE_CUSTOM_SCRIPTS`
+- `CUSTOM_JS_FILES` — comma-separated `.js` paths relative to `custom/`
 - `ENABLE_LOGGING`
 
 ### Permissions
@@ -138,3 +157,36 @@ so booleans such as `ALLOW_EXTERNAL_LINKS` never become an empty string.
 ### Gradle Kotlin DSL compatibility
 
 The configuration loader uses an explicit `java.util.Properties` import and explicit Kotlin lambda parameters so the Gradle Kotlin DSL compiles correctly.
+
+
+## Android TV compatibility
+
+This version declares Android TV/Leanback support, does not require a touchscreen, disables touch-only pull-to-refresh on TV devices, gives the WebView initial D-pad focus, and adds spatial D-pad/OK navigation for common links, buttons, and form controls.
+
+Build with Android Studio/Gradle and install the resulting APK on the TV.
+
+## Android TV build and installation
+
+The project includes explicit Android TV compatibility fixes. In particular, optional
+hardware features are marked `required=false` so permissions such as camera, microphone,
+telephony, Bluetooth, NFC, and location do not accidentally make a TV without that hardware
+look incompatible. A TV launcher banner is also included.
+
+The GitHub Actions workflow builds:
+
+- `*-debug.apk` for development/testing.
+- `*-tv-compatible-release.apk` as a **signed test release** using the standard debug signing
+  key, so it can be sideloaded without a private production keystore.
+
+For production distribution, replace the debug signing configuration with your own release
+keystore before publishing.
+
+To diagnose a TV installation error locally:
+
+```bash
+./tools/install-on-android-tv.sh path/to/app-release.apk
+```
+
+If Android TV still reports `App not installed`, use the exact `Failure [INSTALL_FAILED_...]`
+line printed by ADB. A generic TV dialog does not contain enough information to distinguish a
+signature conflict, version downgrade, ABI mismatch, or another PackageManager error.
