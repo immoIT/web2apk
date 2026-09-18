@@ -267,20 +267,44 @@ class MainActivity : AppCompatActivity() {
     private inner class WebClipboardBridge {
         @JavascriptInterface
         fun readText(): String {
-            if (!isTrustedPage()) return ""
-            return if (clipboardManager.hasPrimaryClip()) {
-                runCatching {
-                    clipboardManager.primaryClip?.getItemAt(0)?.coerceToText(this@MainActivity)?.toString().orEmpty()
-                }.getOrDefault("")
-            } else {
+            if (!isTrustedPage()) {
+                log("Clipboard read blocked: current page is not the configured trusted host")
+                return ""
+            }
+
+            return try {
+                if (!clipboardManager.hasPrimaryClip()) {
+                    log("Clipboard read: no primary clip")
+                    ""
+                } else {
+                    val text = clipboardManager.primaryClip
+                        ?.getItemAt(0)
+                        ?.coerceToText(this@MainActivity)
+                        ?.toString()
+                        .orEmpty()
+                    log("Clipboard read: ${text.length} characters")
+                    text
+                }
+            } catch (t: Throwable) {
+                logError("Clipboard read failed", t)
                 ""
             }
         }
 
         @JavascriptInterface
         fun writeText(text: String?) {
-            if (!isTrustedPage()) return
-            clipboardManager.setPrimaryClip(ClipData.newPlainText("WebView", text.orEmpty()))
+            if (!isTrustedPage()) {
+                log("Clipboard write blocked: current page is not the configured trusted host")
+                return
+            }
+
+            try {
+                val value = text.orEmpty()
+                clipboardManager.setPrimaryClip(ClipData.newPlainText("WebView", value))
+                log("Clipboard write: ${value.length} characters")
+            } catch (t: Throwable) {
+                logError("Clipboard write failed", t)
+            }
         }
     }
 
@@ -298,12 +322,23 @@ class MainActivity : AppCompatActivity() {
                 try {
                     if (!window.AndroidClipboard) return;
 
+                    // Always refresh the bridge. Some web apps replace navigator.clipboard
+                    // during startup, so a one-time injection is not reliable.
                     var nativeClipboard = {
                         readText: function() {
-                            return Promise.resolve(window.AndroidClipboard.readText());
+                            try {
+                                return Promise.resolve(String(window.AndroidClipboard.readText() || ''));
+                            } catch (e) {
+                                console.error('Native clipboard read failed', e);
+                                return Promise.resolve('');
+                            }
                         },
                         writeText: function(text) {
-                            window.AndroidClipboard.writeText(String(text));
+                            try {
+                                window.AndroidClipboard.writeText(String(text == null ? '' : text));
+                            } catch (e) {
+                                console.error('Native clipboard write failed', e);
+                            }
                             return Promise.resolve();
                         }
                     };
@@ -317,6 +352,112 @@ class MainActivity : AppCompatActivity() {
                     } catch (e) {
                         try { navigator.clipboard = nativeClipboard; } catch (_) {}
                     }
+
+                    // Make the native clipboard available to paste buttons/icons too.
+                    // This handles apps that do not call navigator.clipboard.readText()
+                    // themselves when the user taps a Paste control.
+                    if (!window.__androidPasteHandlerInstalled) {
+                        window.__androidPasteHandlerInstalled = true;
+
+                        function isPasteControl(el) {
+                            if (!el || !el.closest) return false;
+                            var control = el.closest('button, [role="button"], input[type="button"], input[type="submit"], a');
+                            if (!control) return false;
+
+                            var text = [
+                                control.innerText || '',
+                                control.getAttribute('aria-label') || '',
+                                control.getAttribute('title') || '',
+                                control.getAttribute('data-action') || ''
+                            ].join(' ').toLowerCase();
+
+                            return /\bpaste\b/.test(text);
+                        }
+
+                        function insertTextIntoTarget(text) {
+                            var target = document.activeElement;
+
+                            // If the Paste icon/button itself has focus, use the most
+                            // recently focused editable element instead.
+                            if (!target || !(
+                                target.tagName === 'INPUT' ||
+                                target.tagName === 'TEXTAREA' ||
+                                target.isContentEditable
+                            )) {
+                                target = window.__androidLastEditableElement;
+                            }
+
+                            if (!target) return false;
+
+                            try {
+                                if (target.isContentEditable) {
+                                    target.focus();
+                                    document.execCommand('insertText', false, text);
+                                    return true;
+                                }
+
+                                if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                                    var start = typeof target.selectionStart === 'number'
+                                        ? target.selectionStart : target.value.length;
+                                    var end = typeof target.selectionEnd === 'number'
+                                        ? target.selectionEnd : target.value.length;
+
+                                    var value = target.value || '';
+                                    target.focus();
+                                    var newValue = value.slice(0, start) + text + value.slice(end);
+
+                                    // Use the native setter so controlled inputs (for
+                                    // example React/Vue forms) also observe the change.
+                                    var proto = target.tagName === 'TEXTAREA'
+                                        ? HTMLTextAreaElement.prototype
+                                        : HTMLInputElement.prototype;
+                                    var setter = Object.getOwnPropertyDescriptor(proto, 'value');
+                                    if (setter && setter.set) {
+                                        setter.set.call(target, newValue);
+                                    } else {
+                                        target.value = newValue;
+                                    }
+
+                                    var cursor = start + text.length;
+                                    try {
+                                        target.setSelectionRange(cursor, cursor);
+                                    } catch (_) {}
+
+                                    target.dispatchEvent(new Event('input', { bubbles: true }));
+                                    target.dispatchEvent(new Event('change', { bubbles: true }));
+                                    return true;
+                                }
+                            } catch (e) {
+                                console.error('Paste insertion failed', e);
+                            }
+                            return false;
+                        }
+
+                        document.addEventListener('focusin', function(event) {
+                            var el = event.target;
+                            if (el && (
+                                el.tagName === 'INPUT' ||
+                                el.tagName === 'TEXTAREA' ||
+                                el.isContentEditable
+                            )) {
+                                window.__androidLastEditableElement = el;
+                            }
+                        }, true);
+
+                        document.addEventListener('click', function(event) {
+                            if (!isPasteControl(event.target)) return;
+
+                            // Read the Android clipboard at click time, while the
+                            // Activity/WebView is foregrounded, then populate the
+                            // focused field. Do not block the site's own click handler.
+                            try {
+                                var text = String(window.AndroidClipboard.readText() || '');
+                                if (text) insertTextIntoTarget(text);
+                            } catch (e) {
+                                console.error('Paste button handling failed', e);
+                            }
+                        }, true);
+                    }
                 } catch (e) {
                     console.error('Android clipboard bridge failed', e);
                 }
@@ -324,6 +465,20 @@ class MainActivity : AppCompatActivity() {
         """.trimIndent()
 
         view.evaluateJavascript(script, null)
+
+        // Re-apply after SPA/framework startup code has had a chance to replace
+        // navigator.clipboard. This is intentionally short-lived.
+        view.postDelayed({
+            if (!isFinishing && !isDestroyed && isTrustedPage()) {
+                view.evaluateJavascript(script, null)
+            }
+        }, 500)
+
+        view.postDelayed({
+            if (!isFinishing && !isDestroyed && isTrustedPage()) {
+                view.evaluateJavascript(script, null)
+            }
+        }, 1500)
     }
 
     private fun handleWebPermissionRequest(request: PermissionRequest) {
