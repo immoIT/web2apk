@@ -32,6 +32,7 @@ Create these repository variables:
 - `ENABLE_DOWNLOADS`
 - `ENABLE_FILE_UPLOAD`
 - `ENABLE_FULLSCREEN_VIDEO`
+- `ENABLE_LOGGING`
 
 ### Android permissions
 - `PERMISSION_INTERNET`
@@ -80,6 +81,7 @@ This is a WebView wrapper, not a native conversion of website source code.
 - `ENABLE_DOWNLOADS` = `true`
 - `ENABLE_FILE_UPLOAD` = `true`
 - `ENABLE_FULLSCREEN_VIDEO` = `true`
+- `ENABLE_LOGGING` = `true`
 - `PERMISSION_INTERNET` = `true`
 - `PERMISSION_CAMERA` = `false`
 - `PERMISSION_MICROPHONE` = `false`
@@ -94,3 +96,11 @@ This is a WebView wrapper, not a native conversion of website source code.
 - `PERMISSION_NFC` = `false`
 
 Replace `WEB_URL` with the actual BoltDownloader website URL, either in GitHub Actions Variables or directly in the workflow default.
+
+## Build diagnostics
+
+GitHub Actions now captures a separate log for each major build step under the `build-logs/` directory. The workflow also uploads a `website-to-apk-build-logs` artifact on every run, including failed runs, containing Gradle logs and diagnostics.
+
+The workflow uses `set -Eeuo pipefail`, `--stacktrace`, `--info`, and `--warning-mode all` so command failures and Gradle errors are visible in the step output. A final failure summary prints the last detected `ERROR`, `FAILURE`, `Exception`, `Caused by`, and warning lines.
+
+The Android app also logs WebView page loads, JavaScript console messages, HTTP/resource/SSL errors, downloads, file chooser failures, external URI handling, and permission failures using the `WebsiteToAPK` Logcat tag. Set `ENABLE_LOGGING=false` to disable these runtime logs.
