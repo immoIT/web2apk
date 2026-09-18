@@ -134,3 +134,7 @@ The GitHub workflow keeps detailed Gradle, resource, Kotlin, APK, and environmen
 GitHub Actions repository variables with the same names override those defaults
 when they are non-empty. Empty/unset variables fall back to the defaults file,
 so booleans such as `ALLOW_EXTERNAL_LINKS` never become an empty string.
+
+### Gradle Kotlin DSL compatibility
+
+The configuration loader uses an explicit `java.util.Properties` import and explicit Kotlin lambda parameters so the Gradle Kotlin DSL compiles correctly.

@@ -231,9 +231,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           {
-            BUILD_CONFIG='app/build/generated/source/buildConfig/debug/com/example/websitetopk/BuildConfig.java'
-            echo "=== Checking $BUILD_CONFIG ==="
-            test -f "$BUILD_CONFIG" || { echo 'ERROR: BuildConfig.java was not generated'; exit 1; }
+            BUILD_CONFIG="$(find app/build/generated/source/buildConfig/debug -type f -name BuildConfig.java -print -quit 2>/dev/null || true)"
+            echo "=== Checking ${BUILD_CONFIG:-<not found>} ==="
+            test -n "$BUILD_CONFIG" && test -f "$BUILD_CONFIG" || { echo 'ERROR: BuildConfig.java was not generated'; exit 1; }
             grep -nE 'public static final (String|boolean) ' "$BUILD_CONFIG"
             if grep -nE '= (True|False);' "$BUILD_CONFIG"; then
               echo 'ERROR: Invalid Java boolean literal found in generated BuildConfig'

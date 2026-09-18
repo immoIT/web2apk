@@ -1,18 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
 val defaultsFile = rootProject.file("config/defaults.properties")
-val defaults = java.util.Properties().apply {
+val defaults = Properties().apply {
     if (defaultsFile.isFile) {
-        defaultsFile.inputStream().use { load(it) }
+        defaultsFile.inputStream().use { input -> load(input) }
     }
 }
 
 fun prop(name: String, default: String): String =
-    project.findProperty(name)?.toString()?.trim()?.takeIf { it.isNotEmpty() }
-        ?: defaults.getProperty(name)?.trim()?.takeIf { it.isNotEmpty() }
+    project.findProperty(name)?.toString()?.trim()?.takeIf { value -> value.isNotEmpty() }
+        ?: defaults.getProperty(name)?.trim()?.takeIf { value -> value.isNotEmpty() }
         ?: default
 
 fun booleanProp(name: String, default: Boolean): String {
