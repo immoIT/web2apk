@@ -1,10 +1,11 @@
 /* =========================================================
- * TV Back Button for curl video player (web2apk Android TV)  v2
+ * TV Back Button for curl video player (web2apk Android TV)  v3
  * ------------------------------------------------------------
  * - Controls show hote hi top-left me Back button aata hai
  * - 5 second baad button + controls DONO force-hide ho jate
  *   hain (TV par mouseenter/focus stuck hone se bachne ke liye)
- * - Remote ki koi bhi key/timer activity par 5s timer reset
+ * - D-PAD (arrow/OK) keys se hidden controls wapas show hote hain
+ * - Remote ki koi bhi key dabane par 5s timer reset hota hai
  * - Video paused ho to controls visible rehte hain (normal)
  * ========================================================= */
 (function () {
@@ -178,13 +179,51 @@
         if (modal) observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
     }
 
-    // Remote ki koi bhi key dabane par dono timers reset ho jayein
-    document.addEventListener('keydown', function () {
-        if (!tvMode || !isPlayerOpen()) return;
-        if (areControlsVisible()) {
-            showBackBtn();
-            scheduleForceHide();   // activity = 5s aur time
+    /* ---------- D-PAD SUPPORT (TV fix) ----------
+     * curl player me arrow/OK keys ka handler nahi hai. TV par controls
+     * hidden hone ke baad D-pad se wapas lane ka koi tareeka nahi.
+     * Ab: player open ho + controls hidden hon + D-pad key aaye
+     *     -> controls show (aur normal 5s timer reset)
+     * ------------------------------------------- */
+    var DPAD_KEYS = {
+        13: true,                               // OK / Enter
+        37: true, 38: true, 39: true, 40: true  // arrows
+    };
+
+    function revealControls() {
+        if (typeof window.showControls === 'function') {
+            window.showControls(AUTO_HIDE_MS);
+        } else {
+            // fallback: synthetic mousemove se curl ka listener trigger karo
+            var wrapper = document.getElementById('wrapper');
+            if (wrapper) {
+                wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+            }
         }
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (!tvMode || !isPlayerOpen()) return;
+
+        var kc = e.keyCode || e.which;
+        var isDpad = DPAD_KEYS[kc] === true ||
+                     (e.key && e.key.indexOf('Arrow') === 0) ||
+                     e.key === 'Enter';
+
+        if (!areControlsVisible()) {
+            // Controls chhupe hain -> D-pad se dikhao
+            if (isDpad) {
+                e.preventDefault();      // page scroll/focus jump roko
+                e.stopPropagation();
+                revealControls();        // curl ka showControls(5000)
+                // observer khud button+timer sambhal lega
+            }
+            return;
+        }
+
+        // Controls visible hain -> koi bhi key = 5s aur time
+        showBackBtn();
+        scheduleForceHide();
     }, true);
 
     // Video pause/play hone par bhi timer sync karo
