@@ -239,6 +239,39 @@
         }
     }, true);
 
+
+    /* ---------- HASH LINK FIX (TV/WebView) ----------
+     * curl ke navbar/retry links me href="#" hai. Isse har click par
+     * ek junk history entry banti hai -> BACK dabane par WebView
+     * canGoBack()=true karke POORA PAGE RELOAD kar deta hai.
+     * Default navigation block karte hain (onclick phir bhi chalta hai),
+     * same-page anchors ko JS se smooth scroll karwa dete hain.
+     * ------------------------------------------------ */
+    document.addEventListener('click', function (e) {
+        if (!tvMode) return;
+        var a = (e.target && e.target.closest) ? e.target.closest('a') : null;
+        if (!a) return;
+
+        var href = a.getAttribute('href');
+        if (typeof href !== 'string') return;
+
+        if (href === '#') {
+            // plain "#" -> history entry MAT banao; onclick khud kaam karega
+            e.preventDefault();
+            return;
+        }
+
+        if (href.charAt(0) === '#' && href.length > 1) {
+            // same-page anchor (#library jaise) -> bina history ke scroll karo
+            e.preventDefault();
+            if (a.onclick) return;   // custom handler khud sambhalega
+            var target = document.getElementById(href.slice(1));
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+    }, true);
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', watchElements);
     } else {
