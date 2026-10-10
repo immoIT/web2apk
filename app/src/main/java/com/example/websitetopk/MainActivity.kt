@@ -72,11 +72,26 @@ class MainActivity : AppCompatActivity() {
     private val fileChooserLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val callback = fileCallback ?: return@registerForActivityResult
+        val callback = fileCallback
         fileCallback = null
-        val results = if (result.resultCode == Activity.RESULT_OK) {
+        if (callback == null) {
+            log("File chooser returned without a pending WebView callback")
+            return@registerForActivityResult
+        }
+
+        val uris = if (result.resultCode == Activity.RESULT_OK) {
             runCatching {
-                WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+                val data = result.data
+                val selected = LinkedHashSet<Uri>()
+                // Some document providers return ClipData for multi-select, while
+                // others return only data.data for a single file.
+                data?.clipData?.let { clip ->
+                    for (index in 0 until clip.itemCount) {
+                        clip.getItemAt(index).uri?.let(selected::add)
+                    }
+                }
+                data?.data?.let(selected::add)
+                selected.toTypedArray().takeIf { it.isNotEmpty() }
             }.getOrElse {
                 logError("File chooser result parsing failed", it)
                 null
@@ -85,7 +100,10 @@ class MainActivity : AppCompatActivity() {
             log("File chooser cancelled: resultCode=${result.resultCode}")
             null
         }
-        callback.onReceiveValue(results)
+
+        log("File chooser completed: resultCode=${result.resultCode}, selected=${uris?.size ?: 0}")
+        runCatching { callback.onReceiveValue(uris) }
+            .onFailure { logError("Could not return selected files to WebView", it) }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -210,19 +228,52 @@ class MainActivity : AppCompatActivity() {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
 
-                return try {
-                    val intent = params.createIntent().apply {
+                val multiple = params.mode == FileChooserParams.MODE_OPEN_MULTIPLE
+                val acceptTypes = params.acceptTypes
+                    .flatMap { it.split(',') }
+                    .map { it.trim().substringBefore(';') }
+                    .filter { it.isNotEmpty() && it != "*/*" }
+                    .distinct()
+
+                // Prefer WebView's intent because it preserves platform-specific
+                // chooser behavior (including capture hints). Fall back to the
+                // Storage Access Framework for devices/providers that cannot handle it.
+                val intents = buildList {
+                    runCatching { params.createIntent() }
+                        .onSuccess { add(it) }
+                        .onFailure { logError("WebView chooser intent creation failed", it) }
+
+                    add(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                         addCategory(Intent.CATEGORY_OPENABLE)
-                    }
-                    log("Launching file chooser: accept=${params.acceptTypes.contentToString()}, multiple=${params.mode == FileChooserParams.MODE_OPEN_MULTIPLE}")
-                    fileChooserLauncher.launch(intent)
-                    true
-                } catch (t: Throwable) {
-                    fileCallback = null
-                    callback.onReceiveValue(null)
-                    logError("File chooser launch failed", t)
-                    false
+                        type = if (acceptTypes.size == 1) acceptTypes.first() else "*/*"
+                        if (acceptTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
+                    })
+                    add(Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = if (acceptTypes.size == 1) acceptTypes.first() else "*/*"
+                        if (acceptTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, acceptTypes.toTypedArray())
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple)
+                    })
                 }
+
+                log("Launching file chooser: accept=${params.acceptTypes.contentToString()}, multiple=$multiple")
+                var lastError: Throwable? = null
+                for ((index, intent) in intents.withIndex()) {
+                    try {
+                        fileChooserLauncher.launch(intent)
+                        log("File chooser launched with strategy ${index + 1}")
+                        return true
+                    } catch (t: Throwable) {
+                        lastError = t
+                        logError("File chooser strategy ${index + 1} failed", t)
+                    }
+                }
+
+                fileCallback = null
+                callback.onReceiveValue(null)
+                logError("All file chooser strategies failed", lastError)
+                return false
             }
         }
 
